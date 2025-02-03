@@ -59,9 +59,11 @@
         </select>
 
         <button class="btn" id="crop-btn">Crop Image</button>
+        <button class="btn" id="zoom-btn">Toggle Zoom</button>
         <button class="btn" id="import-annotations-btn">Import Annotations</button>
         <button class="btn" id="save-annotations-btn">Save Annotations</button>
         <button class="btn" id="export-annotations-btn">Export Annotations</button>
+        <button class="btn" id="save-image-btn">Save Image</button>
 
         <h3>Image Adjustments</h3>
         <label for="brightness">Brightness:</label>
@@ -79,9 +81,11 @@
     <script>
         const classSelect = document.getElementById('class-select');
         const cropBtn = document.getElementById('crop-btn');
+        const zoomBtn = document.getElementById('zoom-btn');
         const importAnnotationsBtn = document.getElementById('import-annotations-btn');
         const saveAnnotationsBtn = document.getElementById('save-annotations-btn');
         const exportAnnotationsBtn = document.getElementById('export-annotations-btn');
+        const saveImageBtn = document.getElementById('save-image-btn');
         const brightnessSlider = document.getElementById('brightness');
         const contrastSlider = document.getElementById('contrast');
         const imageInput = document.getElementById('image-input');
@@ -93,10 +97,49 @@
         let startX, startY, isDrawing = false;
         let selectedClass = 0;
         let cropStartX, cropStartY, cropEndX, cropEndY, isCropping = false;
+        let isZoomMode = false;
+        let isPanning = false;
+        let scale = 1;
+        let offsetX = 0;
+        let offsetY = 0;
+        let panStartX = 0, panStartY = 0;
 
         classSelect.addEventListener('change', (e) => {
             selectedClass = parseInt(e.target.value);
         });
+
+        function getTransformedPoint(x, y) {
+            return {
+                x: (x - offsetX) / scale,
+                y: (y - offsetY) / scale
+            };
+        }
+
+        function redrawImage() {
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            ctx.save();
+            ctx.filter = `brightness(${100 + parseInt(brightnessSlider.value)}%) contrast(${100 + parseInt(contrastSlider.value)}%)`;
+            ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+            ctx.drawImage(image, 0, 0);
+            drawAnnotations();
+            ctx.restore();
+        }
+
+        function drawAnnotations() {
+            annotations.forEach((annotation) => {
+                ctx.save();
+                ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+                ctx.setLineDash([]);
+                ctx.strokeStyle = getClassColor(annotation.class);
+                ctx.lineWidth = 2 / scale;
+                ctx.strokeRect(annotation.x, annotation.y, annotation.width, annotation.height);
+                ctx.restore();
+            });
+        }
 
         imageInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
@@ -109,8 +152,10 @@
                         image = img;
                         canvas.width = img.width;
                         canvas.height = img.height;
-                        ctx.drawImage(img, 0, 0);
-                        drawAnnotations(); // Redraw any existing annotations when the image loads
+                        scale = 1;
+                        offsetX = 0;
+                        offsetY = 0;
+                        redrawImage();
                     };
                     reader.readAsArrayBuffer(file);
                 } else {
@@ -125,87 +170,113 @@
         image.onload = function () {
             canvas.width = image.width;
             canvas.height = image.height;
-            ctx.drawImage(image, 0, 0);
-            drawAnnotations(); // Redraw any existing annotations when the image loads
+            scale = 1;
+            offsetX = 0;
+            offsetY = 0;
+            redrawImage();
         };
 
-        function drawAnnotations() {
-            annotations.forEach((annotation) => {
-                ctx.setLineDash([]); // Reset to solid line
-                ctx.strokeStyle = getClassColor(annotation.class);
-                ctx.lineWidth = 2;
-                ctx.strokeRect(annotation.x, annotation.y, annotation.width, annotation.height);
-            });
-        }
-
         canvas.addEventListener('mousedown', (e) => {
-            if (isCropping) {
-                cropStartX = e.offsetX;
-                cropStartY = e.offsetY;
+            if (isZoomMode) {
+                isPanning = true;
+                panStartX = e.clientX;
+                panStartY = e.clientY;
+                e.preventDefault();
             } else {
-                startX = e.offsetX;
-                startY = e.offsetY;
-                isDrawing = true;
+                const transformed = getTransformedPoint(e.offsetX, e.offsetY);
+                if (isCropping) {
+                    cropStartX = transformed.x;
+                    cropStartY = transformed.y;
+                } else {
+                    startX = transformed.x;
+                    startY = transformed.y;
+                    isDrawing = true;
+                }
             }
         });
 
         canvas.addEventListener('mousemove', (e) => {
-            if (isCropping) {
-                const width = e.offsetX - cropStartX;
-                const height = e.offsetY - cropStartY;
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(image, 0, 0);
-                drawAnnotations();
-                ctx.setLineDash([5, 3]);
-                ctx.strokeStyle = 'blue';
-                ctx.strokeRect(cropStartX, cropStartY, width, height);
-            } else if (isDrawing) {
-                const width = e.offsetX - startX;
-                const height = e.offsetY - startY;
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(image, 0, 0);
-                drawAnnotations();
-                ctx.strokeStyle = getClassColor(selectedClass);
-                ctx.strokeRect(startX, startY, width, height);
+            if (isZoomMode && isPanning) {
+                const dx = e.clientX - panStartX;
+                const dy = e.clientY - panStartY;
+                offsetX += dx;
+                offsetY += dy;
+                panStartX = e.clientX;
+                panStartY = e.clientY;
+                redrawImage();
+                e.preventDefault();
+            } else if (!isZoomMode) {
+                const transformed = getTransformedPoint(e.offsetX, e.offsetY);
+                if (isCropping) {
+                    const width = transformed.x - cropStartX;
+                    const height = transformed.y - cropStartY;
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    redrawImage();
+                    ctx.setLineDash([5, 3]);
+                    ctx.strokeStyle = 'blue';
+                    ctx.strokeRect(cropStartX * scale + offsetX, cropStartY * scale + offsetY, width * scale, height * scale);
+                } else if (isDrawing) {
+                    const width = transformed.x - startX;
+                    const height = transformed.y - startY;
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    redrawImage();
+                    ctx.strokeStyle = getClassColor(selectedClass);
+                    ctx.strokeRect(startX * scale + offsetX, startY * scale + offsetY, width * scale, height * scale);
+                }
             }
         });
 
         canvas.addEventListener('mouseup', (e) => {
-            if (isCropping) {
-                cropEndX = e.offsetX;
-                cropEndY = e.offsetY;
-                cropImage();
-            } else if (isDrawing) {
-                const width = e.offsetX - startX;
-                const height = e.offsetY - startY;
-                annotations.push({ x: startX, y: startY, width, height, class: selectedClass });
-                isDrawing = false;
-                drawAnnotations();
+            if (isZoomMode) {
+                isPanning = false;
+            } else {
+                const transformed = getTransformedPoint(e.offsetX, e.offsetY);
+                if (isCropping) {
+                    cropEndX = transformed.x;
+                    cropEndY = transformed.y;
+                    cropImage();
+                } else if (isDrawing) {
+                    const width = transformed.x - startX;
+                    const height = transformed.y - startY;
+                    annotations.push({ x: startX, y: startY, width, height, class: selectedClass });
+                    isDrawing = false;
+                    redrawImage();
+                }
             }
         });
 
+        canvas.addEventListener('wheel', (e) => {
+            if (isZoomMode) {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                const mouseX = e.offsetX;
+                const mouseY = e.offsetY;
+                const transformed = getTransformedPoint(mouseX, mouseY);
+
+                scale *= delta;
+                scale = Math.min(Math.max(0.1, scale), 10);
+                offsetX = mouseX - transformed.x * scale;
+                offsetY = mouseY - transformed.y * scale;
+                
+                redrawImage();
+            }
+        }, { passive: false });
+
         canvas.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            const x = e.offsetX;
-            const y = e.offsetY;
-            annotations = annotations.filter((annotation) => {
-                return !(x > annotation.x && x < annotation.x + annotation.width &&
-                         y > annotation.y && y < annotation.y + annotation.height);
-            });
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(image, 0, 0);
-            drawAnnotations();
+            if (!isZoomMode) {
+                const transformed = getTransformedPoint(e.offsetX, e.offsetY);
+                annotations = annotations.filter((annotation) => {
+                    return !(transformed.x > annotation.x && transformed.x < annotation.x + annotation.width &&
+                            transformed.y > annotation.y && transformed.y < annotation.y + annotation.height);
+                });
+                redrawImage();
+            }
         });
 
         function getClassColor(classId) {
             const colors = [
-                'gray', // SGN
-                'yellow', // Yellow Neuron
-                'yellow', // Yellow Astrocyte
-                'green', // Green Neuron
-                'green', // Green Astrocyte
-                'red', // Red Neuron
-                'red' // Red Astrocyte
+                'gray', 'yellow', 'yellow', 'green', 'green', 'red', 'red'
             ];
             return colors[classId];
         }
@@ -214,68 +285,62 @@
             const cropWidth = cropEndX - cropStartX;
             const cropHeight = cropEndY - cropStartY;
 
-            // Get the image data for the selected region
-            const croppedImage = ctx.getImageData(cropStartX, cropStartY, cropWidth, cropHeight);
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = cropWidth;
+            tempCanvas.height = cropHeight;
+            tempCtx.drawImage(image, cropStartX, cropStartY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
 
-            // Resize the canvas to the new cropped area
-            canvas.width = cropWidth;
-            canvas.height = cropHeight;
-
-            // Put the cropped image data into the resized canvas
-            ctx.putImageData(croppedImage, 0, 0);
-
-            // Adjust annotations to fit the cropped canvas
-            annotations = annotations.map((annotation) => {
-                // Check if the annotation is inside the crop region
-                if (annotation.x >= cropStartX && annotation.x + annotation.width <= cropEndX &&
-                    annotation.y >= cropStartY && annotation.y + annotation.height <= cropEndY) {
-
-                    // Adjust the annotation's coordinates relative to the cropped region
-                    return {
-                        x: annotation.x - cropStartX,
-                        y: annotation.y - cropStartY,
-                        width: annotation.width,
-                        height: annotation.height,
-                        class: annotation.class
-                    };
-                } else {
-                    // If the annotation is outside the cropped region, remove it
-                    return null;
-                }
-            }).filter((annotation) => annotation !== null);
-
-            // Redraw the annotations on the cropped canvas
-            drawAnnotations();
+            image = new Image();
+            image.src = tempCanvas.toDataURL();
+            image.onload = () => {
+                canvas.width = image.width;
+                canvas.height = image.height;
+                scale = 1;
+                offsetX = 0;
+                offsetY = 0;
+                annotations = annotations.filter(annotation => {
+                    return annotation.x >= cropStartX && annotation.x + annotation.width <= cropEndX &&
+                           annotation.y >= cropStartY && annotation.y + annotation.height <= cropEndY;
+                }).map(annotation => ({
+                    x: annotation.x - cropStartX,
+                    y: annotation.y - cropStartY,
+                    width: annotation.width,
+                    height: annotation.height,
+                    class: annotation.class
+                }));
+                redrawImage();
+            };
         }
 
-        brightnessSlider.addEventListener('input', adjustImage);
-        contrastSlider.addEventListener('input', adjustImage);
-
-        function adjustImage() {
-            const brightness = parseInt(brightnessSlider.value);
-            const contrast = parseInt(contrastSlider.value);
-            ctx.filter = `brightness(${100 + brightness}%) contrast(${100 + contrast}%)`;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(image, 0, 0);
-            drawAnnotations();
-        }
+        brightnessSlider.addEventListener('input', redrawImage);
+        contrastSlider.addEventListener('input', redrawImage);
 
         cropBtn.addEventListener('click', () => {
             isCropping = !isCropping;
-            if (isCropping) {
-                cropBtn.textContent = 'Cancel Crop'; // Change button to allow user to cancel
-            } else {
-                cropBtn.textContent = 'Crop Image'; // Reset button text
-            }
+            cropBtn.textContent = isCropping ? 'Cancel Crop' : 'Crop Image';
         });
 
-        importAnnotationsBtn.addEventListener('click', () => {
-            // Implement import Keras-RetinaNet annotations here
+        zoomBtn.addEventListener('click', () => {
+            isZoomMode = !isZoomMode;
+            zoomBtn.textContent = isZoomMode ? 'Disable Zoom' : 'Toggle Zoom';
         });
 
-        saveAnnotationsBtn.addEventListener('click', () => {
-            const savedAnnotations = JSON.stringify(annotations);
-            alert(`Annotations saved: ${savedAnnotations}`);
+        saveImageBtn.addEventListener('click', () => {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = image.width;
+            tempCanvas.height = image.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(image, 0, 0);
+            annotations.forEach(annotation => {
+                tempCtx.strokeStyle = getClassColor(annotation.class);
+                tempCtx.lineWidth = 2;
+                tempCtx.strokeRect(annotation.x, annotation.y, annotation.width, annotation.height);
+            });
+            const link = document.createElement('a');
+            link.href = tempCanvas.toDataURL('image/png');
+            link.download = 'annotated-image.png';
+            link.click();
         });
 
         exportAnnotationsBtn.addEventListener('click', () => {
@@ -283,13 +348,25 @@
             annotations.forEach(annotation => {
                 csvContent += `${annotation.x},${annotation.y},${annotation.width},${annotation.height},${annotation.class}\n`;
             });
-
-            // Create a CSV file and trigger download
             const blob = new Blob([csvContent], { type: "text/csv" });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
             link.download = 'annotations.csv';
             link.click();
+        });
+
+        saveAnnotationsBtn.addEventListener('click', () => {
+            localStorage.setItem('annotations', JSON.stringify(annotations));
+            alert('Annotations saved locally!');
+        });
+
+        importAnnotationsBtn.addEventListener('click', () => {
+            const savedAnnotations = localStorage.getItem('annotations');
+            if (savedAnnotations) {
+                annotations = JSON.parse(savedAnnotations);
+                redrawImage();
+                alert('Annotations loaded!');
+            }
         });
     </script>
 </body>
