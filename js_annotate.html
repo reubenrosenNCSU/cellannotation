@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Annotation Tool</title>
+    <script src="js/tiff.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+        }
+        .toolbar {
+            width: 200px;
+            background-color: #f4f4f4;
+            padding: 10px;
+        }
+        .canvas-container {
+            position: relative;
+            flex-grow: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+        canvas {
+            border: 1px solid #ccc;
+        }
+        .btn {
+            padding: 8px 12px;
+            margin: 5px 0;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .btn:hover {
+            background-color: #45a049;
+        }
+        .slider {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <h3>Annotations</h3>
+        <label for="class-select">Class:</label>
+        <select id="class-select">
+            <option value="0">SGN</option>
+            <option value="1">Yellow Neuron</option>
+            <option value="2">Yellow Astrocyte</option>
+            <option value="3">Green Neuron</option>
+            <option value="4">Green Astrocyte</option>
+            <option value="5">Red Neuron</option>
+            <option value="6">Red Astrocyte</option>
+        </select>
+
+        <button class="btn" id="crop-btn">Crop Image</button>
+        <button class="btn" id="import-annotations-btn">Import Annotations</button>
+        <button class="btn" id="save-annotations-btn">Save Annotations</button>
+        <button class="btn" id="export-annotations-btn">Export Annotations</button>
+
+        <h3>Image Adjustments</h3>
+        <label for="brightness">Brightness:</label>
+        <input type="range" id="brightness" class="slider" min="-100" max="100" value="0">
+        <br>
+        <label for="contrast">Contrast:</label>
+        <input type="range" id="contrast" class="slider" min="-100" max="100" value="0">
+    </div>
+
+    <div class="canvas-container">
+        <input type="file" id="image-input" accept="image/*" />
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <script>
+        const classSelect = document.getElementById('class-select');
+        const cropBtn = document.getElementById('crop-btn');
+        const importAnnotationsBtn = document.getElementById('import-annotations-btn');
+        const saveAnnotationsBtn = document.getElementById('save-annotations-btn');
+        const exportAnnotationsBtn = document.getElementById('export-annotations-btn');
+        const brightnessSlider = document.getElementById('brightness');
+        const contrastSlider = document.getElementById('contrast');
+        const imageInput = document.getElementById('image-input');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        let image = new Image();
+        let annotations = [];
+        let startX, startY, isDrawing = false;
+        let selectedClass = 0;
+        let cropStartX, cropStartY, cropEndX, cropEndY, isCropping = false;
+
+        classSelect.addEventListener('change', (e) => {
+            selectedClass = parseInt(e.target.value);
+        });
+
+        imageInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                if (file.type === 'image/tiff' || file.name.endsWith('.tiff')) {
+                    reader.onload = function (event) {
+                        const tiff = new Tiff({ buffer: event.target.result });
+                        const img = tiff.toCanvas();
+                        image = img;
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        ctx.drawImage(img, 0, 0);
+                        drawAnnotations(); // Redraw any existing annotations when the image loads
+                    };
+                    reader.readAsArrayBuffer(file);
+                } else {
+                    reader.onload = function (event) {
+                        image.src = event.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }
+        });
+
+        image.onload = function () {
+            canvas.width = image.width;
+            canvas.height = image.height;
+            ctx.drawImage(image, 0, 0);
+            drawAnnotations(); // Redraw any existing annotations when the image loads
+        };
+
+        function drawAnnotations() {
+            annotations.forEach((annotation) => {
+                ctx.setLineDash([]); // Reset to solid line
+                ctx.strokeStyle = getClassColor(annotation.class);
+                ctx.lineWidth = 2;
+                ctx.strokeRect(annotation.x, annotation.y, annotation.width, annotation.height);
+            });
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (isCropping) {
+                cropStartX = e.offsetX;
+                cropStartY = e.offsetY;
+            } else {
+                startX = e.offsetX;
+                startY = e.offsetY;
+                isDrawing = true;
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isCropping) {
+                const width = e.offsetX - cropStartX;
+                const height = e.offsetY - cropStartY;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(image, 0, 0);
+                drawAnnotations();
+                ctx.setLineDash([5, 3]);
+                ctx.strokeStyle = 'blue';
+                ctx.strokeRect(cropStartX, cropStartY, width, height);
+            } else if (isDrawing) {
+                const width = e.offsetX - startX;
+                const height = e.offsetY - startY;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(image, 0, 0);
+                drawAnnotations();
+                ctx.strokeStyle = getClassColor(selectedClass);
+                ctx.strokeRect(startX, startY, width, height);
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (isCropping) {
+                cropEndX = e.offsetX;
+                cropEndY = e.offsetY;
+                cropImage();
+            } else if (isDrawing) {
+                const width = e.offsetX - startX;
+                const height = e.offsetY - startY;
+                annotations.push({ x: startX, y: startY, width, height, class: selectedClass });
+                isDrawing = false;
+                drawAnnotations();
+            }
+        });
+
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const x = e.offsetX;
+            const y = e.offsetY;
+            annotations = annotations.filter((annotation) => {
+                return !(x > annotation.x && x < annotation.x + annotation.width &&
+                         y > annotation.y && y < annotation.y + annotation.height);
+            });
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(image, 0, 0);
+            drawAnnotations();
+        });
+
+        function getClassColor(classId) {
+            const colors = [
+                'gray', // SGN
+                'yellow', // Yellow Neuron
+                'yellow', // Yellow Astrocyte
+                'green', // Green Neuron
+                'green', // Green Astrocyte
+                'red', // Red Neuron
+                'red' // Red Astrocyte
+            ];
+            return colors[classId];
+        }
+
+        function cropImage() {
+            const cropWidth = cropEndX - cropStartX;
+            const cropHeight = cropEndY - cropStartY;
+
+            // Get the image data for the selected region
+            const croppedImage = ctx.getImageData(cropStartX, cropStartY, cropWidth, cropHeight);
+
+            // Resize the canvas to the new cropped area
+            canvas.width = cropWidth;
+            canvas.height = cropHeight;
+
+            // Put the cropped image data into the resized canvas
+            ctx.putImageData(croppedImage, 0, 0);
+
+            // Adjust annotations to fit the cropped canvas
+            annotations = annotations.map((annotation) => {
+                // Check if the annotation is inside the crop region
+                if (annotation.x >= cropStartX && annotation.x + annotation.width <= cropEndX &&
+                    annotation.y >= cropStartY && annotation.y + annotation.height <= cropEndY) {
+
+                    // Adjust the annotation's coordinates relative to the cropped region
+                    return {
+                        x: annotation.x - cropStartX,
+                        y: annotation.y - cropStartY,
+                        width: annotation.width,
+                        height: annotation.height,
+                        class: annotation.class
+                    };
+                } else {
+                    // If the annotation is outside the cropped region, remove it
+                    return null;
+                }
+            }).filter((annotation) => annotation !== null);
+
+            // Redraw the annotations on the cropped canvas
+            drawAnnotations();
+        }
+
+        brightnessSlider.addEventListener('input', adjustImage);
+        contrastSlider.addEventListener('input', adjustImage);
+
+        function adjustImage() {
+            const brightness = parseInt(brightnessSlider.value);
+            const contrast = parseInt(contrastSlider.value);
+            ctx.filter = `brightness(${100 + brightness}%) contrast(${100 + contrast}%)`;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(image, 0, 0);
+            drawAnnotations();
+        }
+
+        cropBtn.addEventListener('click', () => {
+            isCropping = !isCropping;
+            if (isCropping) {
+                cropBtn.textContent = 'Cancel Crop'; // Change button to allow user to cancel
+            } else {
+                cropBtn.textContent = 'Crop Image'; // Reset button text
+            }
+        });
+
+        importAnnotationsBtn.addEventListener('click', () => {
+            // Implement import Keras-RetinaNet annotations here
+        });
+
+        saveAnnotationsBtn.addEventListener('click', () => {
+            const savedAnnotations = JSON.stringify(annotations);
+            alert(`Annotations saved: ${savedAnnotations}`);
+        });
+
+        exportAnnotationsBtn.addEventListener('click', () => {
+            let csvContent = "x,y,width,height,class\n";
+            annotations.forEach(annotation => {
+                csvContent += `${annotation.x},${annotation.y},${annotation.width},${annotation.height},${annotation.class}\n`;
+            });
+
+            // Create a CSV file and trigger download
+            const blob = new Blob([csvContent], { type: "text/csv" });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'annotations.csv';
+            link.click();
+        });
+    </script>
+</body>
+</html>
