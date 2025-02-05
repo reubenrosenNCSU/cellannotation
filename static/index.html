@@ -15,22 +15,30 @@
             height: 100vh;
         }
         .toolbar {
-            width: 220px;
-            background-color: #f4f4f4;
-            padding: 15px;
-            overflow-y: auto;
-        }
-        .canvas-container {
-            flex: 1;
-            position: relative;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: #ddd;
-        }
-        canvas {
-            cursor: crosshair;
-            touch-action: none;
+    width: 220px;
+    background-color: #f4f4f4;
+    padding: 15px;
+    overflow-y: auto;
+    position: fixed; /* Keep toolbar over content */
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 100; /* Ensure toolbar stays on top */
+    box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+}
+
+.canvas-container {
+    margin-left: 220px; /* Offset for toolbar */
+    height: 100vh;
+    overflow: auto; /* Allow scrolling for large images */
+}
+
+canvas {
+    cursor: crosshair;
+    touch-action: none;
+    display: block;
+    /* Remove all max-width/max-height constraints */
+
         }
         .btn {
             display: block;
