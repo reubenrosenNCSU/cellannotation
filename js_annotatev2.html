@@ -169,20 +169,29 @@
             canvas.addEventListener('contextmenu', handleRightClick);
 
             function handleImageUpload(e) {
-                const file = e.target.files[0];
-                if (!file) return;
+            const file = e.target.files[0];
+            if (!file) return;
 
-                state.imageName = file.name;
-                const reader = new FileReader();
-                
-                if (file.type === 'image/tiff' || file.name.endsWith('.tiff')) {
-                    reader.onload = e => loadTiffImage(e.target.result);
-                    reader.readAsArrayBuffer(file);
-                } else {
-                    reader.onload = e => loadRegularImage(e.target.result);
-                    reader.readAsDataURL(file);
-                }
+            // Extract the base name (without extension) and the original extension
+            const fileName = file.name;
+            const fileExtension = fileName.split('.').pop().toLowerCase(); // Get original extension
+            const baseName = fileName.replace(/\.[^/.]+$/, ""); // Remove extension
+
+            // Store the base name and original extension in the state
+            state.imageName = baseName;
+            state.originalExtension = fileExtension;
+
+            const reader = new FileReader();
+            
+            if (file.type === 'image/tiff' || file.name.endsWith('.tiff')) {
+                reader.onload = e => loadTiffImage(e.target.result);
+                reader.readAsArrayBuffer(file);
+            } else {
+                reader.onload = e => loadRegularImage(e.target.result);
+                reader.readAsDataURL(file);
             }
+        }
+
 
             function loadTiffImage(buffer) {
                 const tiff = new Tiff({ buffer });
@@ -355,6 +364,7 @@
 
             // Annotation Operations
             function exportAnnotations() {
+                const filename = `${state.imageName}.${state.originalExtension}`;  // Preserve original name & extension
                 const csv = [
                     'filepath,x1,y1,x2,y2,class_name',
                     ...state.annotations.map(ann => {
@@ -362,7 +372,7 @@
                         const y1 = Math.round(ann.y);
                         const x2 = x1 + Math.round(ann.width);
                         const y2 = y1 + Math.round(ann.height);
-                        return `${state.imageName},${x1},${y1},${x2},${y2},${CLASS_NAMES[ann.class]}`;
+                        return `${filename},${x1},${y1},${x2},${y2},${CLASS_NAMES[ann.class]}`;
                     })
                 ].join('\n');
 
@@ -392,10 +402,7 @@
                             const classIndex = CLASS_NAMES.indexOf(className);
                             
                             if (classIndex === -1) return;
-                            if (filename !== state.imageName) {
-                                alert('Imported annotations do not match current image!');
-                                return;
-                            }
+                            
 
                             state.annotations.push({
                                 x: +x1,
@@ -419,6 +426,7 @@
                 localStorage.setItem('annotations', JSON.stringify({
                     annotations: state.annotations,
                     imageName: state.imageName,
+                    originalExtension: state.originalExtension, // Store original extension
                     naturalSize: state.naturalSize
                 }));
                 alert('Annotations saved locally!');
