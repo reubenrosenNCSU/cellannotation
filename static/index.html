@@ -118,6 +118,7 @@ canvas {
             <div>Current Cells: <span id="current-cell-count">0</span></div>
         </div>
         <button class="btn" id="detect-sgn-btn">Detect SGN</button>
+        <button class="btn" id="detect-madm-btn">Detect MADM</button>
         <button class="btn" id="save-image-btn">Save Image</button>
         <button class="btn" id="clear-training-data-btn" style="background-color: red;"> Clear Training Data</button>
         <button class="btn" id="save-training-data-btn">Save Training Data</button>
@@ -192,6 +193,46 @@ canvas {
             canvas.addEventListener('mouseup', handleMouseUp);
             canvas.addEventListener('wheel', handleWheel);
             canvas.addEventListener('contextmenu', handleRightClick);
+
+            document.getElementById('detect-madm-btn').addEventListener('click', detectMADM);
+
+            async function detectMADM() {
+                try {
+                    const response = await axios.post('/detect-madm');
+                    const csvData = response.data.annotations;
+                    
+                    // Parse and import the annotations
+                    const lines = csvData.split('\n');
+                    state.annotations = [];
+                    let importedCount = 0;
+
+                    lines.forEach(line => {
+                        if (!line.trim()) return;
+                        const [filename, x1, y1, x2, y2, className] = line.split(',');
+                        const classIndex = CLASS_NAMES.indexOf(className);
+                        
+                        if (classIndex === -1) return;
+                        
+                        state.annotations.push({
+                            x: +x1,
+                            y: +y1,
+                            width: +x2 - +x1,
+                            height: +y2 - +y1,
+                            class: classIndex
+                        });
+                        importedCount++;
+                    });
+
+                    updateCellCounts(importedCount);
+                    redraw();
+                    alert(`Successfully imported ${importedCount} detected MADM cells!`);
+
+                } catch (error) {
+                    alert('Detection failed: ' + 
+                        (error.response?.data?.error || error.message));
+                }
+            }
+
 
             document.getElementById('clear-training-data-btn').addEventListener('click', clearTrainingData);
 
