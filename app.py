@@ -164,6 +164,23 @@ def save_training_data():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    
+
+@app.route('/clear-training-data', methods=['POST'])
+def clear_training_data():
+    try:
+        # Clear saved data
+        data_folder = app.config['SAVED_DATA_FOLDER']
+        clear_folder(data_folder)
+        
+        # Clear saved annotations
+        annotations_folder = app.config['SAVED_ANNOTATIONS_FOLDER']
+        clear_folder(annotations_folder)
+        
+        return jsonify({'message': 'Training data cleared successfully'})
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
