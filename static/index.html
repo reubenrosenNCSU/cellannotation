@@ -32,6 +32,13 @@
     height: 100vh;
     overflow: auto; /* Allow scrolling for large images */
 }
+.cell-count {
+    margin: 10px 0;
+    padding: 8px;
+    background: #e8e8e8;
+    border-radius: 4px;
+    font-weight: bold;
+}
 
 canvas {
     cursor: crosshair;
@@ -106,7 +113,14 @@ canvas {
         <button class="btn" id="save-annotations-btn">Save Annotations</button>
         <button class="btn" id="export-annotations-btn">Export Annotations</button>
         <button class="btn" id="import-annotations-btn">Import Annotations</button>
+        <div style="margin-top: 20px;">
+            <div>Imported Cells: <span id="imported-cell-count">0</span></div>
+            <div>Current Cells: <span id="current-cell-count">0</span></div>
+        </div>
+        <button class="btn" id="detect-sgn-btn">Detect SGN</button>
         <button class="btn" id="save-image-btn">Save Image</button>
+        <button class="btn" id="clear-training-data-btn" style="background-color: red;"> Clear Training Data</button>
+        <button class="btn" id="save-training-data-btn">Save Training Data</button>
     </div>
 
     <div class="canvas-container">
@@ -156,6 +170,8 @@ canvas {
             const classSelect = document.getElementById('class-select');
             const loadImageBtn = document.getElementById('load-image-btn');
             const imageInput = document.getElementById('image-input');
+            const importedCellCount = document.getElementById('imported-cell-count');
+            const currentCellCount = document.getElementById('current-cell-count');
 
             // Event Listeners
             loadImageBtn.addEventListener('click', () => imageInput.click());
@@ -176,6 +192,116 @@ canvas {
             canvas.addEventListener('mouseup', handleMouseUp);
             canvas.addEventListener('wheel', handleWheel);
             canvas.addEventListener('contextmenu', handleRightClick);
+
+            document.getElementById('clear-training-data-btn').addEventListener('click', clearTrainingData);
+
+            async function clearTrainingData() {
+                try {
+                    const confirm = window.confirm('Are you sure you want to delete all training data? This cannot be undone!');
+                    if (!confirm) return;
+
+                    await axios.post('/clear-training-data');
+                    alert('All training data has been cleared!');
+                } catch (error) {
+                    alert('Error clearing training data: ' + error.message);
+                }
+            }
+
+            document.getElementById('save-training-data-btn').addEventListener('click', saveTrainingData);
+
+            async function saveTrainingData() {
+                if (!state.image) {
+                    alert('Please load an image first!');
+                    return;
+                }
+
+                try {
+                    // Generate unique filename
+                    const filename = `${state.imageName}_${Date.now()}`;
+                    
+                    // Create image without annotations
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = state.naturalSize.width;
+                    tempCanvas.height = state.naturalSize.height;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    
+                    // Apply current filters
+                    tempCtx.filter = `brightness(${100 + parseInt(brightness.value)}%) 
+                                    contrast(${100 + parseInt(contrast.value)}%)`;
+                    tempCtx.drawImage(state.image, 0, 0);
+
+                    // Convert canvas to Blob
+                    tempCanvas.toBlob(async (imageBlob) => {
+                        // Create FormData
+                        const formData = new FormData();
+                        
+                        // Add image
+                        formData.append('image', imageBlob, `${filename}.png`);
+                        
+                        // Create CSV data
+                        const csvData = state.annotations.map(ann => {
+                            const x1 = Math.round(ann.x);
+                            const y1 = Math.round(ann.y);
+                            const x2 = x1 + Math.round(ann.width);
+                            const y2 = y1 + Math.round(ann.height);
+                            return `${filename}.png,${x1},${y1},${x2},${y2},${CLASS_NAMES[ann.class]}`;
+                        }).join('\n');
+
+                        // Add CSV
+                        formData.append('csv', new Blob([csvData], { type: 'text/csv' }), `${filename}.csv`);
+
+                        // Send to server
+                        await axios.post('/save-training-data', formData, {
+                            headers: { 'Content-Type': 'multipart/form-data' }
+                        });
+                        alert('Training data saved successfully!');
+                    }, 'image/png');
+
+                } catch (error) {
+                    alert('Error saving training data: ' + error.message);
+                }
+            }
+
+
+
+            document.getElementById('detect-sgn-btn').addEventListener('click', detectSGN);
+
+            async function detectSGN() {
+                try {
+                    const response = await axios.post('/detect-sgn');
+                    const csvData = response.data.annotations;
+                    
+                    // Parse and import the annotations
+                    const lines = csvData.split('\n');
+                    state.annotations = [];
+                    let importedCount = 0;
+
+                    lines.forEach(line => {
+                        if (!line.trim()) return;
+                        const [filename, x1, y1, x2, y2, className] = line.split(',');
+                        const classIndex = CLASS_NAMES.indexOf(className);
+                        
+                        if (classIndex === -1) return;
+                        
+                        state.annotations.push({
+                            x: +x1,
+                            y: +y1,
+                            width: +x2 - +x1,
+                            height: +y2 - +y1,
+                            class: classIndex
+                        });
+                        importedCount++;
+                    });
+
+                    updateCellCounts(importedCount);
+                    redraw();
+                    alert(`Successfully imported ${importedCount} detected SGNs!`);
+
+                } catch (error) {
+                    alert('Detection failed: ' + 
+                        (error.response?.data?.error || error.message));
+                }
+            }
 
             async function handleImageUpload(e) {
     const file = e.target.files[0];
@@ -203,7 +329,10 @@ canvas {
             state.naturalSize = {
                 width: img.width,
                 height: img.height
+                
             };
+            updateCellCounts(0);
+
             canvas.width = state.naturalSize.width;
             canvas.height = state.naturalSize.height;
             resetView();
@@ -215,7 +344,12 @@ canvas {
         alert('Error uploading file: ' + error.message);
     }
 }
-
+        function updateCellCounts(importedCount) {
+            if (importedCount !== undefined) {
+                importedCellCount.textContent = importedCount;
+            }
+            currentCellCount.textContent = state.annotations.length;
+        }
 
             function loadTiffImage(buffer) {
                 const tiff = new Tiff({ buffer });
@@ -353,6 +487,7 @@ canvas {
                         height: y - startY,
                         class: state.currentClass
                     });
+                    updateCellCounts();
                     state.isDrawing = false;
                 }
                 
@@ -382,7 +517,7 @@ canvas {
                     !(x >= ann.x && x <= ann.x + ann.width &&
                       y >= ann.y && y <= ann.y + ann.height)
                 );
-                
+                updateCellCounts();
                 redraw();
             }
 
@@ -390,7 +525,7 @@ canvas {
             function exportAnnotations() {
                 const filename = `${state.imageName}.${state.originalExtension}`;  // Preserve original name & extension
                 const csv = [
-                    'filepath,x1,y1,x2,y2,class_name',
+                    
                     ...state.annotations.map(ann => {
                         const x1 = Math.round(ann.x);
                         const y1 = Math.round(ann.y);
@@ -408,53 +543,60 @@ canvas {
             }
 
             function importAnnotations() {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = '.csv';
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.csv';
+            
+            input.onchange = e => {
+                const file = e.target.files[0];
+                const reader = new FileReader();
                 
-                input.onchange = e => {
-                    const file = e.target.files[0];
-                    const reader = new FileReader();
-                    
-                    reader.onload = e => {
-                        const lines = e.target.result.split('\n');
-                        state.annotations = [];
-                        
-                        lines.slice(1).forEach(line => {
-                            if (!line.trim()) return;
-                            const [filename, x1, y1, x2, y2, className] = line.split(',');
-                            const classIndex = CLASS_NAMES.indexOf(className);
-                            
-                            if (classIndex === -1) return;
-                            
+                reader.onload = e => {
+                const lines = e.target.result.split('\n');
+                state.annotations = [];
+                let actualImported = 0;
 
-                            state.annotations.push({
-                                x: +x1,
-                                y: +y1,
-                                width: +x2 - +x1,
-                                height: +y2 - +y1,
-                                class: classIndex
-                            });
-                        });
-                        
-                        redraw();
-                    };
+                lines.forEach(line => {
+                    if (!line.trim()) return;
                     
-                    reader.readAsText(file);
-                };
+                    // Add proper CSV parsing here
+                    const [filename, x1, y1, x2, y2, className] = line.split(',');
+                    const classIndex = CLASS_NAMES.indexOf(className);
+                    
+                    if (classIndex === -1) return; // Skip invalid lines
+                    
+                    state.annotations.push({
+                        x: +x1,
+                        y: +y1,
+                        width: +x2 - +x1,
+                        height: +y2 - +y1,
+                        class: classIndex
+                    });
+                    actualImported++; // Only count successful parses
+                });
+
+                updateCellCounts(actualImported); // Use actual parsed count
+                redraw();
+            };
+
                 
-                input.click();
-            }
+                reader.readAsText(file);
+            };
+            
+            input.click();
+        }
 
-            function saveAnnotations() {
-                localStorage.setItem('annotations', JSON.stringify({
-                    annotations: state.annotations,
-                    imageName: state.imageName,
-                    originalExtension: state.originalExtension, // Store original extension
-                    naturalSize: state.naturalSize
-                }));
-                alert('Annotations saved locally!');
-            }
+
+        function saveAnnotations() {
+        localStorage.setItem('annotations', JSON.stringify({
+            annotations: state.annotations,
+            imageName: state.imageName,
+            originalExtension: state.originalExtension,
+            naturalSize: state.naturalSize
+        }));
+        updateCellCounts();  // Update current count display
+        alert('Annotations saved locally!');
+    }
 
             function saveImage() {
     const tempCanvas = document.createElement('canvas');
@@ -514,6 +656,7 @@ canvas {
                         height: ann.height,
                         class: ann.class
                     }));
+                    updateCellCounts();
 
                 canvas.width = width;
                 canvas.height = height;
