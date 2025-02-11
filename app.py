@@ -181,6 +181,56 @@ def clear_training_data():
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    
+
+@app.route('/detect-madm', methods=['POST'])
+def detect_madm():
+    try:
+        # Find the uploaded image
+        upload_dir = app.config['UPLOAD_FOLDER']
+        uploaded_files = [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]
+        
+        if not uploaded_files:
+            return jsonify({'error': 'No image found. Upload an image first.'}), 400
+            
+        filepath = os.path.join(upload_dir, uploaded_files[0])
+        final_output = app.config['FINAL_OUTPUT_FOLDER']
+
+        # Run processing pipeline with detection.py instead
+        scripts = [
+            ['python3', 'scripts/normalize.py', filepath, final_output],
+            ['python3', 'scripts/splitimage.py', filepath, final_output],
+            ['python3', 'scripts/detection.py', filepath, final_output],  # Changed this line
+            ['python3', 'scripts/mergeimage.py', filepath, final_output],
+            ['python3', 'scripts/mergecsv.py', filepath, final_output]
+        ]
+
+        for script in scripts:
+            result = subprocess.run(script, capture_output=True, text=True)
+            if result.returncode != 0:
+                return jsonify({
+                    'error': f'Script {script[1]} failed',
+                    'message': result.stderr
+                }), 500
+
+        # Cleanup directories
+        for dir_name in CLEANUP_DIRS:
+            dir_path = os.path.join(os.getcwd(), dir_name)
+            if os.path.exists(dir_path):
+                clear_folder(dir_path)
+
+        # Return generated annotations
+        csv_path = os.path.join(final_output, 'annotations.csv')
+        if not os.path.exists(csv_path):
+            return jsonify({'error': 'No annotations generated'}), 500
+
+        with open(csv_path, 'r') as f:
+            csv_data = f.read()
+
+        return jsonify({'annotations': csv_data})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
