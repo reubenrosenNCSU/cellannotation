@@ -21,12 +21,17 @@ CLEANUP_DIRS = ['output', 'input', 'images']
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['CONVERTED_FOLDER'], exist_ok=True)
 
+app.config['SAVED_DATA_FOLDER'] = 'saved_data'
+app.config['SAVED_ANNOTATIONS_FOLDER'] = 'saved_annotations'
+os.makedirs(app.config['SAVED_DATA_FOLDER'], exist_ok=True)
+os.makedirs(app.config['SAVED_ANNOTATIONS_FOLDER'], exist_ok=True)
+
 def clear_uploaded_images():
-    """Delete all files starting with 'uploadedimage.' in uploads folder"""
+    """Delete all files in uploads folder"""
     upload_dir = app.config['UPLOAD_FOLDER']
     for filename in os.listdir(upload_dir):
-        if filename.startswith('uploadedimage.'):
-            file_path = os.path.join(upload_dir, filename)
+        file_path = os.path.join(upload_dir, filename)
+        if os.path.isfile(file_path):
             try:
                 os.remove(file_path)
             except Exception as e:
@@ -53,19 +58,14 @@ def upload_file():
         return jsonify({'error': 'No selected file'}), 400
 
     try:
-        # Clear previous uploaded images
         clear_uploaded_images()
-
-        # Process new upload
         original_name = file.filename
-        original_extension = os.path.splitext(original_name)[1][1:]  # Get extension without dot
-        
-        # Save with fixed name and original extension
-        uploaded_filename = f"uploadedimage.{original_extension}"
-        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], uploaded_filename)
+        base_name = os.path.splitext(original_name)[0]
+        original_extension = os.path.splitext(original_name)[1][1:].lower()
+
+        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], original_name)
         file.save(upload_path)
 
-        # Convert to PNG with unique ID
         unique_id = str(uuid.uuid4())
         output_filename = f"{unique_id}.png"
         output_path = os.path.join(app.config['CONVERTED_FOLDER'], output_filename)
@@ -76,7 +76,7 @@ def upload_file():
         return jsonify({
             'converted_url': f'/converted/{output_filename}',
             'original_name': original_name,
-            'base_name': 'uploadedimage',  # Fixed base name
+            'base_name': base_name,
             'original_extension': original_extension
         })
         
@@ -88,7 +88,7 @@ def detect_sgn():
     try:
         # Find the uploaded image
         upload_dir = app.config['UPLOAD_FOLDER']
-        uploaded_files = [f for f in os.listdir(upload_dir) if f.startswith('uploadedimage.')]
+        uploaded_files = [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]
         
         if not uploaded_files:
             return jsonify({'error': 'No image found. Upload an image first.'}), 400
@@ -135,6 +135,35 @@ def detect_sgn():
 @app.route('/converted/<filename>')
 def serve_converted(filename):
     return send_from_directory(app.config['CONVERTED_FOLDER'], filename)
+
+@app.route('/save-training-data', methods=['POST'])
+def save_training_data():
+    try:
+        # Check if files are present
+        if 'image' not in request.files or 'csv' not in request.files:
+            return jsonify({'error': 'Missing image or CSV'}), 400
+
+        image_file = request.files['image']
+        csv_file = request.files['csv']
+
+        # Validate filenames match
+        image_name = os.path.splitext(image_file.filename)[0]
+        csv_name = os.path.splitext(csv_file.filename)[0]
+        
+        if image_name != csv_name:
+            return jsonify({'error': 'Filename mismatch'}), 400
+
+        # Save files
+        image_path = os.path.join(app.config['SAVED_DATA_FOLDER'], image_file.filename)
+        csv_path = os.path.join(app.config['SAVED_ANNOTATIONS_FOLDER'], csv_file.filename)
+        
+        image_file.save(image_path)
+        csv_file.save(csv_path)
+
+        return jsonify({'message': 'Training data saved successfully'})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
