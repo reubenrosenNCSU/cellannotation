@@ -119,7 +119,7 @@ def stitchDetection(detections, H, W, xsize=512, ysize=512, step=448):
 
 # %% Main code
 
-pATHTEST = '/home/greenbaumgpu/Reuben/CellDetection/images'  # change this to the path that your image is in.
+pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images'  # change this to the path that your image is in.
 testnames, testpaths = listFile(pATHTEST, '.tif')
 
 # Labels for detection
@@ -134,10 +134,10 @@ step = 448  # initial step size, can be adjusted dynamically based on image size
 
 classes = list(labels_to_names.values())
 num_class = len(classes)
-pATHRESULT = '/home/greenbaumgpu/Reuben/CellDetection/output'  # output dir for images
-pATHCSV = '/home/greenbaumgpu/Reuben/CellDetection/output/csv_output'  # output dir for CSV files
+pATHRESULT = '/home/greenbaumgpu/Reuben/js_annotation/output'  # output dir for images
+pATHCSV = '/home/greenbaumgpu/Reuben/js_annotation/output/output_csv'  # output dir for CSV files
 
-model_path = os.path.join('snapshots', 'trainedmodel.h5')
+model_path = os.path.join('/home/greenbaumgpu/Reuben/js_annotation/snapshots', 'trainedmodel.h5')
 
 # load retinanet model
 model = models.load_model(model_path, backbone_name='resnet50')
