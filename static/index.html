@@ -122,6 +122,7 @@ canvas {
         <button class="btn" id="save-image-btn">Save Image</button>
         <button class="btn" id="clear-training-data-btn" style="background-color: red;"> Clear Training Data</button>
         <button class="btn" id="save-training-data-btn">Save Training Data</button>
+        <button class="btn" id="fine-tune-btn">Fine Tune (Custom)</button>
     </div>
 
     <div class="canvas-container">
@@ -720,6 +721,71 @@ canvas {
                 this.classList.toggle('active', state.isZoomMode);
             }
         });
+    </script>
+    <div id="train-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; z-index: 1000;">
+        <h3>Training Setup</h3>
+        
+        <select id="model-type" class="btn">
+            <option value="SGN">SGN</option>
+            <option value="MADM">MADM</option>
+        </select>
+        <input type="number" id="epochs" class="btn" placeholder="Epochs" value="10" min="1" style="margin: 10px 0; width: 100%">
+        <button class="btn" onclick="document.getElementById('train-csv').click()">Upload CSV</button>
+        <input type="file" id="train-csv" hidden accept=".csv">
+        
+        <button class="btn" onclick="document.getElementById('train-images').click()">Upload Images</button>
+        <input type="file" id="train-images" hidden multiple accept="image/*">
+        
+        <button class="btn" onclick="startTraining()">Start Training</button>
+        <button class="btn" onclick="document.getElementById('train-modal').style.display = 'none'">Close</button>
+    </div>
+    <script>
+        let trainingFiles = {
+    csv: null,
+    images: []
+};
+
+// File handlers
+document.getElementById('train-csv').addEventListener('change', function(e) {
+    trainingFiles.csv = e.target.files[0];
+});
+document.getElementById('train-images').addEventListener('change', function(e) {
+    trainingFiles.images = Array.from(e.target.files);
+});
+
+// Training function
+window.startTraining = async function() {
+    const epochs = document.getElementById('epochs').value;
+    if (!epochs || epochs < 1) {
+        alert('Please enter valid number of epochs!');
+    }
+    if (!trainingFiles.csv || trainingFiles.images.length === 0) {
+        alert('Please upload both CSV and images!');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('model_type', document.getElementById('model-type').value);
+    formData.append('csv', trainingFiles.csv);
+    formData.append('epochs', epochs);
+    trainingFiles.images.forEach(img => formData.append('images', img));
+
+    try {
+        const response = await axios.post('/train', formData);
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(new Blob([response.data]));
+        link.download = 'trained_model.h5';
+        link.click();
+        document.getElementById('train-modal').style.display = 'none';
+    } catch (error) {
+        alert('Error: ' + (error.response?.data || error.message));
+    }
+};
+
+// Show modal
+document.getElementById('fine-tune-btn').addEventListener('click', () => {
+    document.getElementById('train-modal').style.display = 'block';
+});
     </script>
 </body>
 </html>
