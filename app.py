@@ -1,10 +1,10 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, send_file
 import os
 from PIL import Image
 import uuid
 from flask_cors import CORS
 import subprocess
-
+import shutil
 
 app = Flask(__name__)
 CORS(app)  # This will allow all domains to access your API
@@ -230,6 +230,79 @@ def detect_madm():
         return jsonify({'annotations': csv_data})
 
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/train', methods=['POST'])
+def train_model():
+    try:
+        # Clean and setup directories
+        shutil.rmtree('ft_upload', ignore_errors=True)
+        os.makedirs('ft_upload', exist_ok=True)
+
+        # Save CSV
+        csv_file = request.files['csv']
+        csv_path = os.path.join('ft_upload', 'annotations.csv')  # Define csv_path
+        csv_file.save(csv_path)
+
+        # Save images
+        for img in request.files.getlist('images'):
+            img.save(os.path.join('ft_upload', img.filename))
+
+        # Get training parameters
+        model_type = request.form.get('model_type', 'SGN')
+        epochs = request.form.get('epochs', '10')
+        classes_file = 'monochrome.csv' if model_type == 'SGN' else 'color.csv'  # Define classes_file
+
+        # Validate epochs
+        try:
+            epochs = int(epochs)
+            if epochs < 1:
+                return jsonify({'error': 'Epochs must be at least 1'}), 400
+        except ValueError:
+            return jsonify({'error': 'Invalid epochs value'}), 400
+
+        # Run training
+        cmd = [
+            'python3', 'keras_retinanet/bin/train.py',
+            '--weights', 'snapshots/combine.h5',
+            '--batch-size', '16',
+            '--epochs', str(epochs),
+            '--snapshot-path', 'snapshots/',
+            'csv', 
+            csv_path,  # Now defined
+            classes_file  # Now defined
+        ]
+
+        # Run with real-time output
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
+        )
+
+        # Stream output to terminal
+        while True:
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                print(output.strip(), flush=True)
+
+        if process.returncode != 0:
+            return jsonify({'error': 'Training failed'}), 500
+
+        # Return latest snapshot
+        snapshots = [f for f in os.listdir('snapshots') 
+                   if f.endswith('.h5') and f != 'combine.h5']
+        if not snapshots:
+            return jsonify({'error': 'No snapshots generated'}), 500
+            
+        latest = max(snapshots, key=lambda f: os.path.getctime(os.path.join('snapshots', f)))
+        return send_file(os.path.join('snapshots', latest))
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
