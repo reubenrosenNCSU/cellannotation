@@ -232,6 +232,118 @@ def detect_madm():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/train-saved', methods=['POST'])
+def train_saved_data():
+    try:
+        # 1. Merge annotations with proper line breaks
+        annotations_dir = app.config['SAVED_ANNOTATIONS_FOLDER']
+        output_csv = os.path.join(app.config['SAVED_DATA_FOLDER'], 'merged_annotations.csv')
+        
+        # Get all CSV files
+        csv_files = [f for f in os.listdir(annotations_dir) if f.endswith('.csv')]
+        if not csv_files:
+            return jsonify({'error': 'No annotation files found in saved_annotations'}), 400
+
+        # Merge files with clean line breaks
+        with open(output_csv, 'w') as outfile:
+            for i, fname in enumerate(csv_files):
+                with open(os.path.join(annotations_dir, fname), 'r') as infile:
+                    lines = infile.readlines()
+                    
+                    # Skip header for subsequent files after first
+                    if i > 0:
+                        lines = lines[1:]
+                        
+                    # Clean lines and ensure proper newlines
+                    cleaned_lines = []
+                    for line in lines:
+                        stripped = line.strip()
+                        if stripped:  # Skip empty lines
+                            cleaned_lines.append(stripped + '\n')
+                    
+                    outfile.writelines(cleaned_lines)
+
+        # 2. Verify merged file and images
+        if not os.path.exists(output_csv):
+            return jsonify({'error': 'Merged annotations failed to create'}), 500
+            
+        images_dir = app.config['SAVED_DATA_FOLDER']
+        image_files = [f for f in os.listdir(images_dir) 
+                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff'))]
+        if not image_files:
+            return jsonify({'error': 'No images found in saved_data folder'}), 400
+
+        # 3. Get training parameters
+        model_type = request.form.get('model_type', 'SGN')
+        epochs = request.form.get('epochs', '10')
+        
+        # Validate epochs
+        try:
+            epochs = int(epochs)
+            if epochs < 1:
+                return jsonify({'error': 'Epochs must be at least 1'}), 400
+        except ValueError:
+            return jsonify({'error': 'Invalid epochs value'}), 400
+
+        # 4. Set class mapping
+        classes_file = 'monochrome.csv' if model_type == 'SGN' else 'color.csv'
+        if not os.path.exists(classes_file):
+            return jsonify({'error': f'Class file {classes_file} not found'}), 400
+
+        # 5. Verify weights exist
+        weights_path = os.path.abspath('snapshots/combine.h5')
+        if not os.path.exists(weights_path):
+            return jsonify({'error': f'Weights file not found at {weights_path}'}), 400
+
+        # 6. Build training command
+        cmd = [
+            'python3', 'keras_retinanet/bin/train.py',
+            '--weights', weights_path,
+            '--batch-size', '16',
+            '--epochs', str(epochs),
+            '--snapshot-path', 'snapshots/',
+            'csv', 
+            os.path.abspath(output_csv),
+            os.path.abspath(classes_file)
+        ]
+
+        # 7. Run training with real-time output
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
+        )
+
+        # Stream output to terminal
+        while True:
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                print(output.strip(), flush=True)
+
+        if process.returncode != 0:
+            return jsonify({'error': 'Training process failed'}), 500
+
+        # 8. Return latest snapshot
+        snapshots = []
+        for root, _, files in os.walk('snapshots'):
+            for file in files:
+                if file.endswith('.h5') and file != 'combine.h5':
+                    snapshots.append(os.path.join(root, file))
+        
+        if not snapshots:
+            return jsonify({'error': 'No training snapshots generated'}), 500
+            
+        latest_snapshot = max(snapshots, key=os.path.getctime)
+        return send_file(latest_snapshot)
+
+    except Exception as e:
+        print(f"[ERROR] Saved data training failed: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/train', methods=['POST'])
 def train_model():
     try:
