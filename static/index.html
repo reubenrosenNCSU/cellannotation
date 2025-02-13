@@ -123,6 +123,7 @@ canvas {
         <button class="btn" id="clear-training-data-btn" style="background-color: red;"> Clear Training Data</button>
         <button class="btn" id="save-training-data-btn">Save Training Data</button>
         <button class="btn" id="fine-tune-btn">Fine Tune (Custom)</button>
+        <button class="btn" id="fine-tune-saved-btn">Fine Tune (Saved Data)</button>
     </div>
 
     <div class="canvas-container">
@@ -199,6 +200,47 @@ canvas {
             canvas.addEventListener('wheel', handleWheel);
             canvas.addEventListener('contextmenu', handleRightClick);
 
+            document.getElementById('fine-tune-saved-btn').addEventListener('click', () => {
+            document.getElementById('saved-train-modal').style.display = 'block';
+        });
+        // NEW: Coordinate sanitization utility
+        function sanitizeBox(x1, y1, x2, y2) {
+            // Ensure x1 <= x2 and y1 <= y2
+            const newX1 = Math.min(x1, x2);
+            const newY1 = Math.min(y1, y2);
+            const newX2 = Math.max(x1, x2);
+            const newY2 = Math.max(y1, y2);
+            return [newX1, newY1, newX2, newY2];
+        }
+
+        // Handle saved data training
+        window.startSavedTraining = async function() {
+            try {
+                const modelType = document.getElementById('saved-model-type').value;
+                const epochs = document.getElementById('saved-epochs').value;
+
+                if (!epochs || epochs < 1) {
+                    alert('Please enter valid number of epochs!');
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('model_type', modelType);
+                formData.append('epochs', epochs);
+
+                const response = await axios.post('/train-saved', formData);
+                
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(new Blob([response.data]));
+                link.download = 'saved_data_trained_model.h5';
+                link.click();
+                
+                document.getElementById('saved-train-modal').style.display = 'none';
+            } catch (error) {
+                alert('Training failed: ' + (error.response?.data?.error || error.message));
+            }
+        };
+
             document.getElementById('detect-madm-btn').addEventListener('click', detectMADM);
 
             async function detectMADM() {
@@ -212,21 +254,30 @@ canvas {
                     let importedCount = 0;
 
                     lines.forEach(line => {
-                        if (!line.trim()) return;
-                        const [filename, x1, y1, x2, y2, className] = line.split(',');
-                        const classIndex = CLASS_NAMES.indexOf(className);
-                        
-                        if (classIndex === -1) return;
-                        
-                        state.annotations.push({
-                            x: +x1,
-                            y: +y1,
-                            width: +x2 - +x1,
-                            height: +y2 - +y1,
-                            class: classIndex
-                        });
-                        importedCount++;
+                    if (!line.trim()) return;
+                    const [filename, x1Str, y1Str, x2Str, y2Str, className] = line.split(',');
+                    
+                    // Convert to numbers and sanitize
+                    let x1 = parseFloat(x1Str);
+                    let y1 = parseFloat(y1Str);
+                    let x2 = parseFloat(x2Str);
+                    let y2 = parseFloat(y2Str);
+                    
+                    // NEW: Apply sanitization
+                    [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
+
+                    const classIndex = CLASS_NAMES.indexOf(className);
+                    if (classIndex === -1) return;
+                    
+                    state.annotations.push({
+                        x: x1,
+                        y: y1,
+                        width: x2 - x1,  // Now guaranteed positive
+                        height: y2 - y1, // Now guaranteed positive
+                        class: classIndex
                     });
+                    importedCount++;
+                });
 
                     updateCellCounts(importedCount);
                     redraw();
@@ -256,57 +307,65 @@ canvas {
             document.getElementById('save-training-data-btn').addEventListener('click', saveTrainingData);
 
             async function saveTrainingData() {
-                if (!state.image) {
-                    alert('Please load an image first!');
-                    return;
-                }
+    if (!state.image) {
+        alert('Please load an image first!');
+        return;
+    }
 
-                try {
-                    // Generate unique filename
-                    const filename = `${state.imageName}_${Date.now()}`;
-                    
-                    // Create image without annotations
-                    const tempCanvas = document.createElement('canvas');
-                    tempCanvas.width = state.naturalSize.width;
-                    tempCanvas.height = state.naturalSize.height;
-                    const tempCtx = tempCanvas.getContext('2d');
-                    
-                    // Apply current filters
-                    tempCtx.filter = `brightness(${100 + parseInt(brightness.value)}%) 
-                                    contrast(${100 + parseInt(contrast.value)}%)`;
-                    tempCtx.drawImage(state.image, 0, 0);
+    try {
+        // Create temporary canvas with filters
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = state.naturalSize.width;
+        tempCanvas.height = state.naturalSize.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // Apply current filters
+        tempCtx.filter = `brightness(${100 + parseInt(brightness.value)}%) 
+                        contrast(${100 + parseInt(contrast.value)}%)`;
+        tempCtx.drawImage(state.image, 0, 0);
 
-                    // Convert canvas to Blob
-                    tempCanvas.toBlob(async (imageBlob) => {
-                        // Create FormData
-                        const formData = new FormData();
-                        
-                        // Add image
-                        formData.append('image', imageBlob, `${filename}.png`);
-                        
-                        // Create CSV data
-                        const csvData = state.annotations.map(ann => {
-                            const x1 = Math.round(ann.x);
-                            const y1 = Math.round(ann.y);
-                            const x2 = x1 + Math.round(ann.width);
-                            const y2 = y1 + Math.round(ann.height);
-                            return `${filename}.png,${x1},${y1},${x2},${y2},${CLASS_NAMES[ann.class]}`;
-                        }).join('\n');
+        // Create RGB canvas (without alpha channel)
+        const rgbCanvas = document.createElement('canvas');
+        rgbCanvas.width = tempCanvas.width;
+        rgbCanvas.height = tempCanvas.height;
+        const rgbCtx = rgbCanvas.getContext('2d', { alpha: false }); // Disable alpha channel
+        
+        
+        // Fill with white background first
+        rgbCtx.fillStyle = '#FFFFFF';
+        rgbCtx.fillRect(0, 0, rgbCanvas.width, rgbCanvas.height);
+        
+        // Draw filtered image onto RGB canvas
+        rgbCtx.drawImage(tempCanvas, 0, 0);
 
-                        // Add CSV
-                        formData.append('csv', new Blob([csvData], { type: 'text/csv' }), `${filename}.csv`);
+        // Convert to Blob (now will be RGB PNG)
+        rgbCanvas.toBlob(async (imageBlob) => {
+            const filename = `${state.imageName}_${Date.now()}`;
+            const formData = new FormData();
+            
+            formData.append('image', imageBlob, `${filename}.png`);
+            
+            // Create CSV data (same as before)
+            const csvData = state.annotations.map(ann => {
+                let x1 = Math.round(ann.x);
+                    let y1 = Math.round(ann.y);
+                    let x2 = Math.round(ann.x + ann.width);
+                    let y2 = Math.round(ann.y + ann.height);
+                    [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2); // Final check
+                return `${filename}.png,${x1},${y1},${x2},${y2},${CLASS_NAMES[ann.class]}`;
+            }).join('\n');
 
-                        // Send to server
-                        await axios.post('/save-training-data', formData, {
-                            headers: { 'Content-Type': 'multipart/form-data' }
-                        });
-                        alert('Training data saved successfully!');
-                    }, 'image/png');
+            formData.append('csv', new Blob([csvData], { type: 'text/csv' }), `${filename}.csv`);
 
-                } catch (error) {
-                    alert('Error saving training data: ' + error.message);
-                }
-            }
+            await axios.post('/save-training-data', formData);
+            alert('Training data saved successfully!');
+        }, 'image/jpeg');  // Still save as PNG but now RGB format
+
+    } catch (error) {
+        alert('Error saving training data: ' + error.message);
+    }
+}
+
 
 
 
@@ -323,21 +382,30 @@ canvas {
                     let importedCount = 0;
 
                     lines.forEach(line => {
-                        if (!line.trim()) return;
-                        const [filename, x1, y1, x2, y2, className] = line.split(',');
-                        const classIndex = CLASS_NAMES.indexOf(className);
-                        
-                        if (classIndex === -1) return;
-                        
-                        state.annotations.push({
-                            x: +x1,
-                            y: +y1,
-                            width: +x2 - +x1,
-                            height: +y2 - +y1,
-                            class: classIndex
-                        });
-                        importedCount++;
+                    if (!line.trim()) return;
+                    const [filename, x1Str, y1Str, x2Str, y2Str, className] = line.split(',');
+                    
+                    // Convert to numbers and sanitize
+                    let x1 = parseFloat(x1Str);
+                    let y1 = parseFloat(y1Str);
+                    let x2 = parseFloat(x2Str);
+                    let y2 = parseFloat(y2Str);
+                    
+                    // NEW: Apply sanitization
+                    [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
+
+                    const classIndex = CLASS_NAMES.indexOf(className);
+                    if (classIndex === -1) return;
+                    
+                    state.annotations.push({
+                        x: x1,
+                        y: y1,
+                        width: x2 - x1,  // Now guaranteed positive
+                        height: y2 - y1, // Now guaranteed positive
+                        class: classIndex
                     });
+                    importedCount++;
+                });
 
                     updateCellCounts(importedCount);
                     redraw();
@@ -515,22 +583,18 @@ canvas {
                 }
 
                 const { x, y } = getTransformedPoint(lastX, lastY);
+                const [x1, y1, x2, y2] = sanitizeBox(startX, startY, x, y);
                 
                 if (state.isCropping) {
-                    const minX = Math.min(startX, x);
-                    const minY = Math.min(startY, y);
-                    const maxX = Math.max(startX, x);
-                    const maxY = Math.max(startY, y);
-                    
-                    cropImage(minX, minY, maxX - minX, maxY - minY);
+                    cropImage(x1, y1, x2 - x1, y2 - y1);
                     state.isCropping = false;
                     document.getElementById('crop-btn').classList.remove('active');
                 } else if (state.isDrawing) {
                     state.annotations.push({
-                        x: startX,
-                        y: startY,
-                        width: x - startX,
-                        height: y - startY,
+                        x: x1,
+                        y: y1,
+                        width: x2 - x1,  // Always positive
+                        height: y2 - y1, // Always positive
                         class: state.currentClass
                     });
                     updateCellCounts();
@@ -539,7 +603,6 @@ canvas {
                 
                 redraw();
             }
-
             function handleWheel(e) {
                 if (!state.isZoomMode) return;
                 
@@ -573,10 +636,11 @@ canvas {
                 const csv = [
                     
                     ...state.annotations.map(ann => {
-                        const x1 = Math.round(ann.x);
-                        const y1 = Math.round(ann.y);
-                        const x2 = x1 + Math.round(ann.width);
-                        const y2 = y1 + Math.round(ann.height);
+                        let x1 = Math.round(ann.x);
+                        let y1 = Math.round(ann.y);
+                        let x2 = Math.round(ann.x + ann.width);
+                        let y2 = Math.round(ann.y + ann.height);
+                        [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2); // Final check
                         return `${filename},${x1},${y1},${x2},${y2},${CLASS_NAMES[ann.class]}`;
                     })
                 ].join('\n');
@@ -598,37 +662,39 @@ canvas {
                 const reader = new FileReader();
                 
                 reader.onload = e => {
-                const lines = e.target.result.split('\n');
-                state.annotations = [];
-                let actualImported = 0;
+                    const lines = e.target.result.split('\n');
+                    state.annotations = [];
+                    let actualImported = 0;
 
-                lines.forEach(line => {
-                    if (!line.trim()) return;
-                    
-                    // Add proper CSV parsing here
-                    const [filename, x1, y1, x2, y2, className] = line.split(',');
-                    const classIndex = CLASS_NAMES.indexOf(className);
-                    
-                    if (classIndex === -1) return; // Skip invalid lines
-                    
-                    state.annotations.push({
-                        x: +x1,
-                        y: +y1,
-                        width: +x2 - +x1,
-                        height: +y2 - +y1,
-                        class: classIndex
+                    lines.forEach(line => {
+                        if (!line.trim()) return;
+                        const [filename, x1Str, y1Str, x2Str, y2Str, className] = line.split(',');
+                        
+                        // NEW: Convert and sanitize
+                        let x1 = parseFloat(x1Str);
+                        let y1 = parseFloat(y1Str);
+                        let x2 = parseFloat(x2Str);
+                        let y2 = parseFloat(y2Str);
+                        [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
+
+                        const classIndex = CLASS_NAMES.indexOf(className);
+                        if (classIndex === -1) return;
+
+                        state.annotations.push({
+                            x: x1,
+                            y: y1,
+                            width: x2 - x1,
+                            height: y2 - y1,
+                            class: classIndex
+                        });
+                        actualImported++;
                     });
-                    actualImported++; // Only count successful parses
-                });
 
-                updateCellCounts(actualImported); // Use actual parsed count
-                redraw();
-            };
-
-                
+                    updateCellCounts(actualImported);
+                    redraw();
+                };
                 reader.readAsText(file);
             };
-            
             input.click();
         }
 
@@ -787,5 +853,22 @@ document.getElementById('fine-tune-btn').addEventListener('click', () => {
     document.getElementById('train-modal').style.display = 'block';
 });
     </script>
+<div id="saved-train-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; z-index: 1000;">
+    <h3>Train with Saved Data</h3>
+    
+    <select id="saved-model-type" class="btn">
+        <option value="SGN">SGN</option>
+        <option value="MADM">MADM</option>
+    </select>
+    
+    <input type="number" id="saved-epochs" class="btn" 
+           placeholder="Epochs" value="10" min="1" 
+           style="margin: 10px 0; width: 100%">
+    
+    <button class="btn" onclick="startSavedTraining()">Start Training</button>
+    <button class="btn" onclick="document.getElementById('saved-train-modal').style.display = 'none'">
+        Close
+    </button>
+</div>
 </body>
 </html>
