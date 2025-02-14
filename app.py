@@ -1,3 +1,4 @@
+from werkzeug.utils import secure_filename  # ADD THIS AT TOP OF FILE
 from flask import Flask, request, jsonify, send_from_directory, send_file
 import os
 from PIL import Image
@@ -5,6 +6,8 @@ import uuid
 from flask_cors import CORS
 import subprocess
 import shutil
+import h5py
+import time
 
 app = Flask(__name__)
 CORS(app)  # This will allow all domains to access your API
@@ -299,7 +302,7 @@ def train_saved_data():
         cmd = [
             'python3', 'keras_retinanet/bin/train.py',
             '--weights', weights_path,
-            '--batch-size', '16',
+            '--batch-size', '1',
             '--epochs', str(epochs),
             '--snapshot-path', 'snapshots/',
             'csv', 
@@ -327,22 +330,32 @@ def train_saved_data():
             return jsonify({'error': 'Training process failed'}), 500
 
         # 8. Return latest snapshot
-        snapshots = []
-        for root, _, files in os.walk('snapshots'):
-            for file in files:
-                if file.endswith('.h5') and file != 'combine.h5':
-                    snapshots.append(os.path.join(root, file))
+# 8. Get the specific snapshot based on epochs
+        epoch_str = f"{epochs:02d}"  # Format as two-digit number
+        expected_filename = f'resnet50_csv_{epoch_str}.h5'
+        snapshot_path = os.path.join('snapshots', expected_filename)
         
-        if not snapshots:
-            return jsonify({'error': 'No training snapshots generated'}), 500
-            
-        latest_snapshot = max(snapshots, key=os.path.getctime)
-        return send_file(latest_snapshot)
+        if not os.path.exists(snapshot_path):
+            return jsonify({'error': f'Expected snapshot {expected_filename} not found'}), 500
+
+        # Validate HDF5 file
+        try:
+            with h5py.File(snapshot_path, 'r') as f:
+                if 'model_weights' not in f:
+                    raise ValueError("Invalid model structure")
+        except Exception as e:
+            return jsonify({'error': f'Invalid model file: {str(e)}'}), 500
+
+        return send_file(
+            snapshot_path,
+            as_attachment=True,
+            download_name=expected_filename,
+            mimetype='application/octet-stream'
+        )
 
     except Exception as e:
         print(f"[ERROR] Saved data training failed: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
 
 @app.route('/train', methods=['POST'])
 def train_model():
@@ -377,7 +390,7 @@ def train_model():
         cmd = [
             'python3', 'keras_retinanet/bin/train.py',
             '--weights', 'snapshots/combine.h5',
-            '--batch-size', '16',
+            '--batch-size', '1',
             '--epochs', str(epochs),
             '--snapshot-path', 'snapshots/',
             'csv', 
@@ -405,17 +418,94 @@ def train_model():
             return jsonify({'error': 'Training failed'}), 500
 
         # Return latest snapshot
-        snapshots = [f for f in os.listdir('snapshots') 
-                   if f.endswith('.h5') and f != 'combine.h5']
-        if not snapshots:
-            return jsonify({'error': 'No snapshots generated'}), 500
-            
-        latest = max(snapshots, key=lambda f: os.path.getctime(os.path.join('snapshots', f)))
-        return send_file(os.path.join('snapshots', latest))
+        # Get specific snapshot based on epochs
+        epoch_str = f"{epochs:02d}"
+        expected_filename = f'resnet50_csv_{epoch_str}.h5'
+        snapshot_path = os.path.join('snapshots', expected_filename)
+        
+        # Wait for file to be fully written
+        time.sleep(2)  # Safety delay
+        if not os.path.exists(snapshot_path):
+            return jsonify({'error': f'Expected snapshot {expected_filename} not found'}), 500
+
+        # Validate HDF5 file
+        try:
+            with h5py.File(snapshot_path, 'r') as f:
+                if 'model_weights' not in f:
+                    raise ValueError("Invalid model structure")
+        except Exception as e:
+            return jsonify({'error': f'Invalid model file: {str(e)}'}), 500
+
+        return send_file(
+            snapshot_path,
+            as_attachment=True,
+            download_name=expected_filename,
+            mimetype='application/octet-stream'
+        )
 
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+    
+@app.route('/detect-custom', methods=['POST'])
+def detect_custom():
+    try:
+        # Get uploaded model and image
+        h5_file = request.files['h5_file']
+        upload_dir = app.config['UPLOAD_FOLDER']
+        final_output = app.config['FINAL_OUTPUT_FOLDER']
+        
+        # Save model temporarily
+        model_path = os.path.join(upload_dir, secure_filename(h5_file.filename))
+        h5_file.save(model_path)
+
+        # Find uploaded image
+        image_files = [f for f in os.listdir(upload_dir) 
+                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff'))]
+        if not image_files:
+            return jsonify({'error': 'No image found'}), 400
+            
+        image_name = image_files[0]
+        image_path = os.path.join(upload_dir, image_name)
+
+        # Run detection script
+        subprocess.run([
+            'python3', 'scripts/custom_detection.py',
+            image_path,
+            model_path,
+            final_output
+        ], check=True)
+
+        # CORRECTED: Use full image name with extension for CSV filename
+        csv_filename = f"{os.path.basename(image_path)}_result.csv"
+        csv_path = os.path.join(final_output, 'output_csv', csv_filename)
+        
+        if not os.path.exists(csv_path):
+            return jsonify({
+                'error': f'Annotations file not found at: {csv_path}',
+                'searched_path': csv_path
+            }), 500
+
+        with open(csv_path, 'r') as f:
+            csv_data = f.read()
+
+        return jsonify({'annotations': csv_data})
+
+    except subprocess.CalledProcessError as e:
+        return jsonify({
+            'error': 'Detection failed',
+            'details': str(e),
+            'cmd': e.cmd,
+            'output': e.output
+        }), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        # Cleanup model file
+        try:
+            os.remove(model_path)
+        except:
+            pass
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
