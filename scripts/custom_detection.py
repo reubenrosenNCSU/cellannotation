@@ -1,18 +1,18 @@
 #!/usr/bin/env python
-# coding: utf-8
-
 import keras
 import sys
-import os
-import numpy as np
-import cv2
-import csv
+import matplotlib.pyplot as plt
 from keras_retinanet import models
 from keras_retinanet.utils.image import read_image_bgr, preprocess_image, resize_image
 from keras_retinanet.utils.visualization import draw_box, draw_caption
 from keras_retinanet.utils.colors import label_color
+from keras_retinanet.utils.gpu import setup_gpu
+import cv2
+import csv
+import os
+import numpy as np
+from scipy.io import loadmat
 
-# %% Functions (Unchanged from original)
 def listFile(path, ext):
     filename_list, filepath_list = [], []
     for r, d, f in os.walk(path):
@@ -34,7 +34,6 @@ def listTile(path):
 def non_max_suppression_merge(boxes, overlapThresh=0.5, sort=4):
     if len(boxes) == 0:
         return []
-
     pick = []
     x1 = boxes[:, 0]
     y1 = boxes[:, 1]
@@ -43,7 +42,6 @@ def non_max_suppression_merge(boxes, overlapThresh=0.5, sort=4):
     area = (x2 - x1 + 1) * (y2 - y1 + 1)
     idxs = np.argsort(y2)
     idxs = np.argsort(boxes[:, sort])
-
     while len(idxs) > 0:
         last = len(idxs) - 1
         i = idxs[last]
@@ -62,7 +60,6 @@ def non_max_suppression_merge(boxes, overlapThresh=0.5, sort=4):
             yyy2 = max(y2[i], y2[idxs[np.where(overlap > overlapThresh)[0]]].max())
             boxes[i, :4] = [xxx1, yyy1, xxx2, yyy2]
         idxs = np.delete(idxs, np.concatenate(([last], np.where(overlap > overlapThresh)[0])))
-
     return boxes[pick]
 
 def stitchDetection(detections, H, W, xsize=512, ysize=512, step=448):
@@ -74,53 +71,61 @@ def stitchDetection(detections, H, W, xsize=512, ysize=512, step=448):
     cols = []
     for col in range(step, H, step):
         cols.extend(list(range(col - 32, col + y_overlap + 32)))
-
     overlap_idx = []
     for i, detection in enumerate(list(detections)):
         box = list(map(int, detection[:-1]))
         if (box[0] in rows) or (box[1] in cols):
             overlap_idx.append(i)
-
     overlap_detections = detections[overlap_idx].copy()
     clean_mask = np.ones(detections.shape[0], dtype=bool)
     clean_mask[overlap_idx] = False
     clean_detections = detections[clean_mask].copy()
-
     if overlap_detections.size > 1:
         overlap_detections = non_max_suppression_merge(overlap_detections)
         clean_detections = np.append(clean_detections, overlap_detections, axis=0)
-
     return clean_detections
 
-# %% Main code (Only modified input handling)
-def detect_objects(image_path, model_path, output_folder, xsize=512, ysize=512, step=448, threshold=0.5):
-    # Modified input handling
-    if os.path.isdir(image_path):
-        testnames, testpaths = listFile(image_path, '.tif')
-    else:
-        testnames = [os.path.basename(image_path)]
-        testpaths = [image_path]
+if __name__ == '__main__':
+    if len(sys.argv) != 4:
+        print("Usage: python detection_SGN.py <input_image> <model_path> <output_dir>")
+        sys.exit(1)
 
-    # Original implementation below
+    # Get arguments
+    INPUT_IMAGE = sys.argv[1]
+    MODEL_PATH = sys.argv[2]
+    OUTPUT_DIR = sys.argv[3]
+
+    # Original parameters (modified to use arguments)
+    pATHTEST = os.path.dirname(INPUT_IMAGE)
+    testnames = [os.path.basename(INPUT_IMAGE)]
+    testpaths = [INPUT_IMAGE]
+    
     labels_to_names = {0: 'SGN'}
-    tHRESHOLD = threshold
+    tHRESHOLD = 0.5
+    xsize = 512
+    ysize = 512
+    step = 448
     classes = list(labels_to_names.values())
     num_class = len(classes)
-    pATHRESULT = output_folder
-    pATHCSV = output_folder
+    
+    # Modified output paths
+    pATHRESULT = os.path.join(OUTPUT_DIR, 'output_images')
+    pATHCSV = os.path.join(OUTPUT_DIR, 'output_csv')
+    os.makedirs(pATHRESULT, exist_ok=True)
+    os.makedirs(pATHCSV, exist_ok=True)
 
-    model = models.load_model(model_path, backbone_name='resnet50')
+    # Load model from argument
+    model = models.load_model(MODEL_PATH, backbone_name='resnet50')
     model = models.convert_model(model)
 
+    # Rest of original processing code
     all_detections = [[None for i in range(num_class)] for j in range(len(testnames))]
     clean_detections = [[None for i in range(num_class)] for j in range(len(testnames))]
-    CSV = os.path.join(output_folder, 'custom_annotations.csv')
 
     for i, testpath in enumerate(testpaths):
-        CSV = os.path.join(output_folder, 'custom_annotations.csv')
+        CSV = os.path.join(pATHCSV, testnames[i] + '_result.csv')
         with open(CSV, 'w', newline='') as csvfile:
-            filewriter = csv.writer(csvfile, delimiter=',', quotechar='|', 
-                                    quoting=csv.QUOTE_MINIMAL)
+            filewriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
             
             fullimg_c1 = read_image_bgr(testpath)
             fullimg = np.zeros(fullimg_c1.shape, dtype=np.uint16)
@@ -190,9 +195,9 @@ def detect_objects(image_path, model_path, output_folder, xsize=512, ysize=512, 
                 else:
                     cleaned_detections = detections.copy()
                 cleaned_detections = np.concatenate([cleaned_detections,
-                                                            np.zeros([cleaned_detections.shape[0],1]),
-                                                            np.ones([cleaned_detections.shape[0],1])*(i+1)],
-                                                            axis=1)
+                                                    np.zeros([cleaned_detections.shape[0],1]),
+                                                    np.ones([cleaned_detections.shape[0],1])*(i+1)],
+                                                    axis=1)
                 clean_detections[i][label] = cleaned_detections
 
                 if cleaned_detections.size > 1:
@@ -202,16 +207,10 @@ def detect_objects(image_path, model_path, output_folder, xsize=512, ysize=512, 
                         draw_box(fulldraw, b, color=color, thickness=2)
                         cleaned_detections[j,5] = fullimg[b[1]:b[3],b[0]:b[2]].mean()
                         filewriter.writerow([testnames[i],
-                                                        detection[0],detection[1],
-                                                        detection[2],detection[3],
-                                                        classes[label],detection[-3],
-                                                        detection[-2],detection[-1]])
-                            
-                output_image_path = os.path.join(pATHRESULT, 'custom_detection.png')
-                cv2.imwrite(output_image_path, cv2.cvtColor(fulldraw.astype('uint8'), cv2.COLOR_RGB2GRAY))
-
-if __name__ == "__main__":
-    image_path = sys.argv[1]
-    h5file_path = sys.argv[2]
-    output_folder = sys.argv[3]
-    detect_objects(image_path, h5file_path, output_folder)
+                                            detection[0],detection[1],
+                                            detection[2],detection[3],
+                                            classes[label],detection[-3],
+                                            detection[-2],detection[-1]])
+            
+            output_image_path = os.path.join(pATHRESULT, testnames[i] + '_detected.png')
+            cv2.imwrite(output_image_path, cv2.cvtColor(fulldraw.astype('uint8'), cv2.COLOR_RGB2GRAY))
