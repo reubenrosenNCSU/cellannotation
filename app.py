@@ -11,6 +11,7 @@ import time
 from PIL import Image, ImageOps
 import numpy as np
 
+
 app = Flask(__name__)
 CORS(app)  # This will allow all domains to access your API
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -195,14 +196,15 @@ def save_training_data():
 
         # Save CSV
         csv_file = request.files['csv']
-        csv_filename = f"{original_filename}.csv"
+        csv_filename = f"{unique_id}.csv"
         csv_path = os.path.join(app.config['SAVED_ANNOTATIONS_FOLDER'], csv_filename)
         csv_file.save(csv_path)
 
         return jsonify({'message': 'Training data saved successfully'})
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500    
+        return jsonify({'error': str(e)}), 500
+    
 
 @app.route('/clear-training-data', methods=['POST'])
 def clear_training_data():
@@ -288,6 +290,9 @@ def train_saved_data():
                 with open(os.path.join(annotations_dir, fname), 'r') as infile:
                     lines = infile.readlines()
                     
+                    # Skip header for subsequent files after first
+                    if i > 0:
+                        lines = lines[1:]
                         
                     # Clean lines and ensure proper newlines
                     cleaned_lines = []
@@ -304,7 +309,7 @@ def train_saved_data():
             
         images_dir = app.config['SAVED_DATA_FOLDER']
         image_files = [f for f in os.listdir(images_dir) 
-                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff','.tif'))]
+                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.tif'))]
         if not image_files:
             return jsonify({'error': 'No images found in saved_data folder'}), 400
 
@@ -321,10 +326,7 @@ def train_saved_data():
             return jsonify({'error': 'Invalid epochs value'}), 400
 
         # 4. Set class mapping
-        classes_file = os.path.join(
-            os.path.dirname(__file__),  # Gets directory of current script
-            'monochrome.csv' if model_type == 'SGN' else 'color.csv'
-        )
+        classes_file = 'monochrome.csv' if model_type == 'SGN' else 'color.csv'
         if not os.path.exists(classes_file):
             return jsonify({'error': f'Class file {classes_file} not found'}), 400
 
@@ -338,12 +340,12 @@ def train_saved_data():
             'python3', 'keras_retinanet/bin/train.py',
             '--weights', weights_path,
             '--freeze-backbone',
-            '--lr', '1e-5',  # Increased from 1e-6
+            '--lr', '1e-5',
             '--batch-size', '1',
             '--epochs', str(epochs),
             '--snapshot-path', 'snapshots/',
-            'csv', output_csv,
-            classes_file  # Now uses full path
+            'csv', '/home/greenbaumgpu/Reuben/js_annotation/saved_data/merged_annotations.csv',
+            os.path.abspath(classes_file)
         ]
 
         # 7. Run training with real-time output
@@ -500,7 +502,7 @@ def detect_custom():
 
         # Find uploaded image
         image_files = [f for f in os.listdir(upload_dir) 
-                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.tif'))]
+                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff'))]
         if not image_files:
             return jsonify({'error': 'No image found'}), 400
             
