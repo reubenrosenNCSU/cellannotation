@@ -8,6 +8,8 @@ import subprocess
 import shutil
 import h5py
 import time
+from PIL import Image, ImageOps
+import numpy as np
 
 app = Flask(__name__)
 CORS(app)  # This will allow all domains to access your API
@@ -48,8 +50,6 @@ def clear_folder(folder):
             os.remove(file_path)
         elif os.path.isdir(file_path):
             clear_folder(file_path)
-
-
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -142,32 +142,67 @@ def serve_converted(filename):
 @app.route('/save-training-data', methods=['POST'])
 def save_training_data():
     try:
-        # Check if files are present
-        if 'image' not in request.files or 'csv' not in request.files:
-            return jsonify({'error': 'Missing image or CSV'}), 400
+        # Get processing parameters
+        original_filename = request.form['original_filename']
+        brightness = float(request.form.get('brightness', 0))
+        contrast = float(request.form.get('contrast', 0))
+        
+        # Load original image
+        original_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+        if not os.path.exists(original_path):
+            return jsonify({'error': 'Original image not found'}), 400
 
-        image_file = request.files['image']
+        # Open and process image
+        with Image.open(original_path) as img:
+            # Convert to numpy array
+            img_array = np.array(img)
+            
+            # Normalize to 32-bit float for processing
+            img_float = img_array.astype(np.float32)
+            
+            # Apply brightness (linear multiplier)
+            brightness_factor = (100 + brightness) / 100.0
+            img_float *= brightness_factor
+            
+            # Apply contrast (relative to 50% gray)
+            contrast_factor = (100 + contrast) / 100.0
+            if img_array.dtype == np.uint16:
+                midpoint = 32767.5  # 16-bit midpoint
+            else:
+                midpoint = 127.5    # 8-bit midpoint
+            
+            img_float = (img_float - midpoint) * contrast_factor + midpoint
+            
+            # Clip and convert to 16-bit
+            img_float = np.clip(img_float, 0, 65535)
+            img_16bit = img_float.astype(np.uint16)
+            
+            # Create normalized 16-bit TIFF
+            normalized_img = Image.fromarray(img_16bit)
+            
+            # Generate unique filename
+            unique_id = str(uuid.uuid4())
+            tiff_filename = original_filename
+            image_path = os.path.join(app.config['SAVED_DATA_FOLDER'], tiff_filename)
+            
+            # Save as 16-bit TIFF with deflate compression
+            normalized_img.save(
+                image_path,
+                format='TIFF',
+                compression='tiff_deflate',
+                bits=16
+            )
+
+        # Save CSV
         csv_file = request.files['csv']
-
-        # Validate filenames match
-        image_name = os.path.splitext(image_file.filename)[0]
-        csv_name = os.path.splitext(csv_file.filename)[0]
-        
-        if image_name != csv_name:
-            return jsonify({'error': 'Filename mismatch'}), 400
-
-        # Save files
-        image_path = os.path.join(app.config['SAVED_DATA_FOLDER'], image_file.filename)
-        csv_path = os.path.join(app.config['SAVED_ANNOTATIONS_FOLDER'], csv_file.filename)
-        
-        image_file.save(image_path)
+        csv_filename = f"{original_filename}.csv"
+        csv_path = os.path.join(app.config['SAVED_ANNOTATIONS_FOLDER'], csv_filename)
         csv_file.save(csv_path)
 
         return jsonify({'message': 'Training data saved successfully'})
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    
+        return jsonify({'error': str(e)}), 500    
 
 @app.route('/clear-training-data', methods=['POST'])
 def clear_training_data():
@@ -253,9 +288,6 @@ def train_saved_data():
                 with open(os.path.join(annotations_dir, fname), 'r') as infile:
                     lines = infile.readlines()
                     
-                    # Skip header for subsequent files after first
-                    if i > 0:
-                        lines = lines[1:]
                         
                     # Clean lines and ensure proper newlines
                     cleaned_lines = []
@@ -272,7 +304,7 @@ def train_saved_data():
             
         images_dir = app.config['SAVED_DATA_FOLDER']
         image_files = [f for f in os.listdir(images_dir) 
-                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff'))]
+                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff','.tif'))]
         if not image_files:
             return jsonify({'error': 'No images found in saved_data folder'}), 400
 
@@ -289,12 +321,15 @@ def train_saved_data():
             return jsonify({'error': 'Invalid epochs value'}), 400
 
         # 4. Set class mapping
-        classes_file = 'monochrome.csv' if model_type == 'SGN' else 'color.csv'
+        classes_file = os.path.join(
+            os.path.dirname(__file__),  # Gets directory of current script
+            'monochrome.csv' if model_type == 'SGN' else 'color.csv'
+        )
         if not os.path.exists(classes_file):
             return jsonify({'error': f'Class file {classes_file} not found'}), 400
 
         # 5. Verify weights exist
-        weights_path = os.path.abspath('snapshots/combine.h5')
+        weights_path = 'snapshots/SGNmodel.h5' if model_type == 'SGN' else 'snapshots/combine.h5'
         if not os.path.exists(weights_path):
             return jsonify({'error': f'Weights file not found at {weights_path}'}), 400
 
@@ -302,12 +337,13 @@ def train_saved_data():
         cmd = [
             'python3', 'keras_retinanet/bin/train.py',
             '--weights', weights_path,
+            '--freeze-backbone',
+            '--lr', '1e-5',  # Increased from 1e-6
             '--batch-size', '1',
             '--epochs', str(epochs),
             '--snapshot-path', 'snapshots/',
-            'csv', 
-            os.path.abspath(output_csv),
-            os.path.abspath(classes_file)
+            'csv', output_csv,
+            classes_file  # Now uses full path
         ]
 
         # 7. Run training with real-time output
@@ -330,7 +366,7 @@ def train_saved_data():
             return jsonify({'error': 'Training process failed'}), 500
 
         # 8. Return latest snapshot
-# 8. Get the specific snapshot based on epochs
+        # 8. Get the specific snapshot based on epochs
         epoch_str = f"{epochs:02d}"  # Format as two-digit number
         expected_filename = f'resnet50_csv_{epoch_str}.h5'
         snapshot_path = os.path.join('snapshots', expected_filename)
@@ -377,6 +413,7 @@ def train_model():
         model_type = request.form.get('model_type', 'SGN')
         epochs = request.form.get('epochs', '10')
         classes_file = 'monochrome.csv' if model_type == 'SGN' else 'color.csv'  # Define classes_file
+        weights_file = 'snapshots/SGNmodel.h5' if model_type == 'SGN' else 'snapshots/combine.h5'
 
         # Validate epochs
         try:
@@ -389,7 +426,9 @@ def train_model():
         # Run training
         cmd = [
             'python3', 'keras_retinanet/bin/train.py',
-            '--weights', 'snapshots/combine.h5',
+            '--weights', weights_file,
+            '--freeze-backbone',
+            '--lr', '1e-5',
             '--batch-size', '1',
             '--epochs', str(epochs),
             '--snapshot-path', 'snapshots/',
@@ -461,7 +500,7 @@ def detect_custom():
 
         # Find uploaded image
         image_files = [f for f in os.listdir(upload_dir) 
-                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff'))]
+                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.tif'))]
         if not image_files:
             return jsonify({'error': 'No image found'}), 400
             
