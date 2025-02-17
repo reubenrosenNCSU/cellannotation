@@ -124,6 +124,7 @@ canvas {
         <button class="btn" id="save-training-data-btn">Save Training Data</button>
         <button class="btn" id="fine-tune-btn">Fine Tune (Custom)</button>
         <button class="btn" id="fine-tune-saved-btn">Fine Tune (Saved Data)</button>
+        <button class="btn" id="custom-detect-btn">Custom Detect</button>
     </div>
 
     <div class="canvas-container">
@@ -203,6 +204,78 @@ canvas {
             document.getElementById('fine-tune-saved-btn').addEventListener('click', () => {
             document.getElementById('saved-train-modal').style.display = 'block';
         });
+
+        // CUSTOM DETECTION CODE
+        document.getElementById('custom-detect-btn').addEventListener('click', () => {
+            document.getElementById('custom-detect-modal').style.display = 'block';
+        });
+
+        document.getElementById('custom-model-file').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            document.getElementById('selected-model-name').textContent = file ? file.name : 'No file selected';
+        });
+
+        document.getElementById('run-custom-detect').addEventListener('click', async () => {
+            try {
+                const modelType = document.getElementById('custom-model-type').value;
+                const modelFile = document.getElementById('custom-model-file').files[0];
+                
+                if (!modelFile) {
+                    alert('Please select a .h5 model file!');
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('model_type', modelType);
+                formData.append('h5_file', modelFile);
+
+                const response = await axios.post('/detect-custom', formData, {
+                    headers: {'Content-Type': 'multipart/form-data'}
+                });
+                
+
+
+                // Process CSV data
+                const csvData = response.data.annotations;
+                    const lines = csvData.split('\n');
+                    
+                    state.annotations = [];
+                    let importedCount = 0;
+
+                    lines.forEach(line => {
+                        if (!line.trim()) return;
+                        const [filename, x1Str, y1Str, x2Str, y2Str, className] = line.split(',');  // Same as import
+                        
+                        // Identical coordinate handling
+                        let x1 = parseFloat(x1Str);
+                        let y1 = parseFloat(y1Str);
+                        let x2 = parseFloat(x2Str);
+                        let y2 = parseFloat(y2Str);
+                        [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
+
+                        const classIndex = CLASS_NAMES.indexOf(className.trim());
+                        if (classIndex === -1) return;
+
+                        state.annotations.push({
+                            x: x1,
+                            y: y1,
+                            width: x2 - x1,
+                            height: y2 - y1,
+                            class: classIndex
+                        });
+                        importedCount++;
+                    });
+
+                    updateCellCounts(importedCount);
+                    redraw();
+                    alert(`Successfully detected ${importedCount} objects!`);
+
+                } catch (error) {
+                console.error('Custom detection error:', error);
+                alert('Detection failed: ' + (error.response?.data?.error || error.message));
+            }
+        });
+
         // NEW: Coordinate sanitization utility
         function sanitizeBox(x1, y1, x2, y2) {
             // Ensure x1 <= x2 and y1 <= y2
@@ -228,12 +301,17 @@ canvas {
                 formData.append('model_type', modelType);
                 formData.append('epochs', epochs);
 
-                const response = await axios.post('/train-saved', formData);
-                
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(new Blob([response.data]));
-                link.download = 'saved_data_trained_model.h5';
-                link.click();
+                const response = await axios.post('/train-saved', formData, {
+                responseType: 'blob'  // MUST BE SET
+            });
+
+            const blob = new Blob([response.data], {type: 'application/octet-stream'});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = response.headers['content-disposition']
+                .split('filename=')[1]
+                .replace(/"/g, '');
+            link.click();
                 
                 document.getElementById('saved-train-modal').style.display = 'none';
             } catch (error) {
@@ -313,54 +391,28 @@ canvas {
     }
 
     try {
-        // Create temporary canvas with filters
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = state.naturalSize.width;
-        tempCanvas.height = state.naturalSize.height;
-        const tempCtx = tempCanvas.getContext('2d');
+        const formData = new FormData();
+        const originalFilename = `${state.imageName}.${state.originalExtension}`;
         
-        // Apply current filters
-        tempCtx.filter = `brightness(${100 + parseInt(brightness.value)}%) 
-                        contrast(${100 + parseInt(contrast.value)}%)`;
-        tempCtx.drawImage(state.image, 0, 0);
+        // Add processing parameters
+        formData.append('original_filename', originalFilename);
+        formData.append('brightness', brightness.value);
+        formData.append('contrast', contrast.value);
 
-        // Create RGB canvas (without alpha channel)
-        const rgbCanvas = document.createElement('canvas');
-        rgbCanvas.width = tempCanvas.width;
-        rgbCanvas.height = tempCanvas.height;
-        const rgbCtx = rgbCanvas.getContext('2d', { alpha: false }); // Disable alpha channel
-        
-        
-        // Fill with white background first
-        rgbCtx.fillStyle = '#FFFFFF';
-        rgbCtx.fillRect(0, 0, rgbCanvas.width, rgbCanvas.height);
-        
-        // Draw filtered image onto RGB canvas
-        rgbCtx.drawImage(tempCanvas, 0, 0);
+        // Create CSV data
+        const csvData = state.annotations.map(ann => {
+            let x1 = Math.round(ann.x);
+            let y1 = Math.round(ann.y);
+            let x2 = Math.round(ann.x + ann.width);
+            let y2 = Math.round(ann.y + ann.height);
+            [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
+            return `${originalFilename},${x1},${y1},${x2},${y2},${CLASS_NAMES[ann.class]}`;
+        }).join('\n');
 
-        // Convert to Blob (now will be RGB PNG)
-        rgbCanvas.toBlob(async (imageBlob) => {
-            const filename = `${state.imageName}_${Date.now()}`;
-            const formData = new FormData();
-            
-            formData.append('image', imageBlob, `${filename}.png`);
-            
-            // Create CSV data (same as before)
-            const csvData = state.annotations.map(ann => {
-                let x1 = Math.round(ann.x);
-                    let y1 = Math.round(ann.y);
-                    let x2 = Math.round(ann.x + ann.width);
-                    let y2 = Math.round(ann.y + ann.height);
-                    [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2); // Final check
-                return `${filename}.png,${x1},${y1},${x2},${y2},${CLASS_NAMES[ann.class]}`;
-            }).join('\n');
+        formData.append('csv', new Blob([csvData], { type: 'text/csv' }), 'annotations.csv');
 
-            formData.append('csv', new Blob([csvData], { type: 'text/csv' }), `${filename}.csv`);
-
-            await axios.post('/save-training-data', formData);
-            alert('Training data saved successfully!');
-        }, 'image/jpeg');  // Still save as PNG but now RGB format
-
+        await axios.post('/save-training-data', formData);
+        alert('Training data saved successfully!');
     } catch (error) {
         alert('Error saving training data: ' + error.message);
     }
@@ -837,12 +889,18 @@ window.startTraining = async function() {
     trainingFiles.images.forEach(img => formData.append('images', img));
 
     try {
-        const response = await axios.post('/train', formData);
+        const response = await axios.post('/train', formData, {
+            responseType: 'blob'  // Add this line
+        });
+
+        // REPLACE THE DOWNLOAD CODE WITH THIS
+        const blob = new Blob([response.data], {type: 'application/octet-stream'});
         const link = document.createElement('a');
-        link.href = URL.createObjectURL(new Blob([response.data]));
-        link.download = 'trained_model.h5';
+        link.href = URL.createObjectURL(blob);
+        link.download = response.headers['content-disposition']
+                          .split('filename=')[1]
+                          .replace(/"/g, '');
         link.click();
-        document.getElementById('train-modal').style.display = 'none';
     } catch (error) {
         alert('Error: ' + (error.response?.data || error.message));
     }
@@ -852,6 +910,7 @@ window.startTraining = async function() {
 document.getElementById('fine-tune-btn').addEventListener('click', () => {
     document.getElementById('train-modal').style.display = 'block';
 });
+
     </script>
 <div id="saved-train-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; z-index: 1000;">
     <h3>Train with Saved Data</h3>
@@ -869,6 +928,30 @@ document.getElementById('fine-tune-btn').addEventListener('click', () => {
     <button class="btn" onclick="document.getElementById('saved-train-modal').style.display = 'none'">
         Close
     </button>
+</div>
+<!-- ADD THIS CUSTOM DETECT MODAL -->
+<div id="custom-detect-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; z-index: 1000; border: 1px solid #ccc;">
+    <h3 style="margin-top: 0;">Custom Detection</h3>
+    
+    <div style="margin-bottom: 15px;">
+        <select id="custom-model-type" class="btn" style="width: 100%;">
+            <option value="SGN">SGN Model</option>
+            <option value="MADM">MADM Model</option>
+        </select>
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+        <label class="btn" style="display: block; background: #4CAF50; color: white;">
+            Upload Model (.h5)
+            <input type="file" id="custom-model-file" accept=".h5" hidden>
+        </label>
+        <div id="selected-model-name" style="margin-top: 5px; font-size: 0.9em;"></div>
+    </div>
+    
+    <div style="display: flex; gap: 10px;">
+        <button class="btn" id="run-custom-detect" style="flex: 1;">Detect</button>
+        <button class="btn" onclick="document.getElementById('custom-detect-modal').style.display = 'none'" style="flex: 1; background: #666;">Close</button>
+    </div>
 </div>
 </body>
 </html>
