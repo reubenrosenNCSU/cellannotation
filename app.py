@@ -145,58 +145,27 @@ def save_training_data():
     try:
         # Get processing parameters
         original_filename = request.form['original_filename']
-        brightness = float(request.form.get('brightness', 0))
-        contrast = float(request.form.get('contrast', 0))
         
-        # Load original image
+        # Load original image directly without any processing
         original_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
         if not os.path.exists(original_path):
             return jsonify({'error': 'Original image not found'}), 400
 
-        # Open and process image
+        # Create output filename
+        tiff_filename = original_filename
+        image_path = os.path.join(app.config['SAVED_DATA_FOLDER'], tiff_filename)
+        
+        # Convert directly to TIFF without any adjustments
         with Image.open(original_path) as img:
-            # Convert to numpy array
-            img_array = np.array(img)
-            
-            # Normalize to 32-bit float for processing
-            img_float = img_array.astype(np.float32)
-            
-            # Apply brightness (linear multiplier)
-            brightness_factor = (100 + brightness) / 100.0
-            img_float *= brightness_factor
-            
-            # Apply contrast (relative to 50% gray)
-            contrast_factor = (100 + contrast) / 100.0
-            if img_array.dtype == np.uint16:
-                midpoint = 32767.5  # 16-bit midpoint
-            else:
-                midpoint = 127.5    # 8-bit midpoint
-            
-            img_float = (img_float - midpoint) * contrast_factor + midpoint
-            
-            # Clip and convert to 16-bit
-            img_float = np.clip(img_float, 0, 65535)
-            img_16bit = img_float.astype(np.uint16)
-            
-            # Create normalized 16-bit TIFF
-            normalized_img = Image.fromarray(img_16bit)
-            
-            # Generate unique filename
-            unique_id = str(uuid.uuid4())
-            tiff_filename = original_filename
-            image_path = os.path.join(app.config['SAVED_DATA_FOLDER'], tiff_filename)
-            
-            # Save as 16-bit TIFF with deflate compression
-            normalized_img.save(
+            img.save(
                 image_path,
                 format='TIFF',
-                compression='tiff_deflate',
-                bits=16
+                compression='tiff_deflate'
             )
 
-        # Save CSV
+        # Save CSV (rest remains the same)
         csv_file = request.files['csv']
-        csv_filename = f"{unique_id}.csv"
+        csv_filename = f"{uuid.uuid4()}.csv"
         csv_path = os.path.join(app.config['SAVED_ANNOTATIONS_FOLDER'], csv_filename)
         csv_file.save(csv_path)
 
@@ -275,33 +244,41 @@ def detect_madm():
 @app.route('/train-saved', methods=['POST'])
 def train_saved_data():
     try:
-        # 1. Merge annotations with proper line breaks
+        # 1. Copy pre-train images to saved_data
+        pre_train_dir = 'pre_train_SGN'
+        saved_data_dir = app.config['SAVED_DATA_FOLDER']
+        
+        if os.path.isdir(pre_train_dir):
+            for filename in os.listdir(pre_train_dir):
+                src_path = os.path.join(pre_train_dir, filename)
+                if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.tif')):
+                    dest_path = os.path.join(saved_data_dir, filename)
+                    shutil.copy2(src_path, dest_path)
+
+        # 2. Merge annotations with pre_annot.csv
         annotations_dir = app.config['SAVED_ANNOTATIONS_FOLDER']
         output_csv = os.path.join(app.config['SAVED_DATA_FOLDER'], 'merged_annotations.csv')
-        
-        # Get all CSV files
-        csv_files = [f for f in os.listdir(annotations_dir) if f.endswith('.csv')]
-        if not csv_files:
-            return jsonify({'error': 'No annotation files found in saved_annotations'}), 400
+        pre_annot_path = os.path.join(pre_train_dir, 'pre_annot.csv')
 
-        # Merge files with clean line breaks
         with open(output_csv, 'w') as outfile:
+            # Process saved annotations
+            csv_files = [f for f in os.listdir(annotations_dir) if f.endswith('.csv')]
             for i, fname in enumerate(csv_files):
                 with open(os.path.join(annotations_dir, fname), 'r') as infile:
                     lines = infile.readlines()
-                    
-                    # Skip header for subsequent files after first
                     if i > 0:
-                        lines = lines[1:]
-                        
-                    # Clean lines and ensure proper newlines
-                    cleaned_lines = []
-                    for line in lines:
-                        stripped = line.strip()
-                        if stripped:  # Skip empty lines
-                            cleaned_lines.append(stripped + '\n')
-                    
+                        lines = lines[1:]  # Skip header for subsequent files
+                    cleaned_lines = [line.strip() + '\n' for line in lines if line.strip()]
                     outfile.writelines(cleaned_lines)
+
+            # Add pre_annot.csv if exists
+            if os.path.exists(pre_annot_path):
+                with open(pre_annot_path, 'r') as pre_file:
+                    lines = pre_file.readlines()
+                    if lines:
+                        lines = lines[1:]  # Skip header
+                        cleaned_lines = [line.strip() + '\n' for line in lines if line.strip()]
+                        outfile.writelines(cleaned_lines)
 
         # 2. Verify merged file and images
         if not os.path.exists(output_csv):
@@ -315,7 +292,7 @@ def train_saved_data():
 
         # 3. Get training parameters
         model_type = request.form.get('model_type', 'SGN')
-        epochs = request.form.get('epochs', '10')
+        epochs = request.form.get('epochs', '20')
         
         # Validate epochs
         try:
@@ -340,7 +317,7 @@ def train_saved_data():
             'python3', 'keras_retinanet/bin/train.py',
             '--weights', weights_path,
             '--freeze-backbone',
-            '--lr', '1e-5',
+            '--lr', '1e-6',
             '--batch-size', '1',
             '--epochs', str(epochs),
             '--snapshot-path', 'snapshots/',
@@ -502,7 +479,7 @@ def detect_custom():
 
         # Find uploaded image
         image_files = [f for f in os.listdir(upload_dir) 
-                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff'))]
+                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.tif'))]
         if not image_files:
             return jsonify({'error': 'No image found'}), 400
             
