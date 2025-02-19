@@ -30,4 +30,8 @@ and then open
 127.0.0.1:5000/static/index.html
 ```
 
-you can also use your host static IP so that multiple computers on the same network can access it. Make sure firewall permissions are granted.
+you can also use your host static IP so that multiple computers on the same network can access it. Make sure firewall permissions are granted. You  can install the dependencies using the following
+```bash
+pip install -r requirements.txt
+```
+alternatively you can use the requirements.yml file. it is a copy of the conda environment I had used in development.
