@@ -1,14 +1,22 @@
 #!/usr/bin/env python
 # coding: utf-8
+import sys
+import os
 
+# 1. Prioritize your local directory FIRST
+sys.path.insert(0, "/home/greenbaumgpu/Reuben/js_annotation")
+
+# 2. Import your modified utils/image.py BEFORE other keras_retinanet modules
+from keras_retinanet.utils.image import read_image_bgr, preprocess_image, resize_image
 import keras
 import sys
 import matplotlib.pyplot as plt
 from keras_retinanet import models
-from keras_retinanet.utils.image import read_image_bgr, preprocess_image, resize_image
 from keras_retinanet.utils.visualization import draw_box, draw_caption
 from keras_retinanet.utils.colors import label_color
 from keras_retinanet.utils.gpu import setup_gpu
+
+
 
 import cv2
 import csv
@@ -135,7 +143,7 @@ num_class = len(classes)
 pATHRESULT = '/home/greenbaumgpu/Reuben/js_annotation/output'  # output dir for images
 pATHCSV = '/home/greenbaumgpu/Reuben/js_annotation/output/output_csv'  # output dir for CSV files
 
-model_path = os.path.join('/home/greenbaumgpu/Reuben/js_annotation/snapshots', 'SGNmodel.h5')
+model_path = os.path.join('/home/greenbaumgpu/Reuben/js_annotation/snapshots', 'SGN_Rene.h5')
 
 # load retinanet model
 model = models.load_model(model_path, backbone_name='resnet50')
@@ -204,7 +212,7 @@ for i, testpath in enumerate(testpaths):
                         image = fullimg_pad[y:y + step_y, x:x + step_x]
 
                         # Preprocess the image
-                        image = preprocess_image(image)
+                        image = preprocess_image(image, dynamic=True)
                         image, scale = resize_image(image)
 
                         # Process the image through the model
