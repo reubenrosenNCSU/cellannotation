@@ -35,3 +35,6 @@ you can also use your host static IP so that multiple computers on the same netw
 pip install -r requirements.txt
 ```
 alternatively you can use the requirements.yml file. it is a copy of the conda environment I had used in development.
+```bash
+conda env create -f requirements.yml
+```
