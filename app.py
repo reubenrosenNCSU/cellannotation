@@ -18,14 +18,34 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['CONVERTED_FOLDER'] = 'converted'
 app.config['MAX_CONTENT_LENGTH'] = 5000000 * 1024 * 1024  # if it exceeds 50MB limit
 app.config['FINAL_OUTPUT_FOLDER'] = 'finaloutput'
-os.makedirs(app.config['FINAL_OUTPUT_FOLDER'], exist_ok=True)
+app.config['FT_UPLOAD_FOLDER'] = 'ft_upload'
+app.config['IMAGES_FOLDER'] = 'images'
+app.config['INPUT_FOLDER'] = 'input'
+app.config['NORMALIZE_FOLDER'] = 'normalize'
+app.config['OUTPUT_FOLDER'] = 'output'
+app.config['OUTPUT_CSV_FOLDER'] ='output/output_csv'
+os.makedirs(app.config['FINAL_OUTPUT_FOLDER'], exist_ok=True) #finaloutput
+os.makedirs(app.config['FT_UPLOAD_FOLDER'], exist_ok=True) #ft_upload
+os.makedirs(app.config['IMAGES_FOLDER'], exist_ok=True) #images
+os.makedirs(app.config['INPUT_FOLDER'], exist_ok=True) #input
+os.makedirs(app.config['NORMALIZE_FOLDER'], exist_ok=True) #normalize folder
+os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
+os.makedirs(app.config['OUTPUT_CSV_FOLDER'], exist_ok=True)
+
+
+
+
+
+
+
+
 
 # Add these additional directories to clear
 CLEANUP_DIRS = ['output', 'input', 'images']
 
 # Create directories if they don't exist
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-os.makedirs(app.config['CONVERTED_FOLDER'], exist_ok=True)
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True) #generate uploads folder
+os.makedirs(app.config['CONVERTED_FOLDER'], exist_ok=True) #generate converted folder
 
 app.config['SAVED_DATA_FOLDER'] = 'saved_data'
 app.config['SAVED_ANNOTATIONS_FOLDER'] = 'saved_annotations'
@@ -308,7 +328,7 @@ def train_saved_data():
             return jsonify({'error': f'Class file {classes_file} not found'}), 400
 
         # 5. Verify weights exist
-        weights_path = 'snapshots/SGNmodel.h5' if model_type == 'SGN' else 'snapshots/combine.h5'
+        weights_path = 'snapshots/SGN_Rene.h5' if model_type == 'SGN' else 'snapshots/combine.h5'
         if not os.path.exists(weights_path):
             return jsonify({'error': f'Weights file not found at {weights_path}'}), 400
 
@@ -392,7 +412,7 @@ def train_model():
         model_type = request.form.get('model_type', 'SGN')
         epochs = request.form.get('epochs', '10')
         classes_file = 'monochrome.csv' if model_type == 'SGN' else 'color.csv'  # Define classes_file
-        weights_file = 'snapshots/SGNmodel.h5' if model_type == 'SGN' else 'snapshots/combine.h5'
+        weights_file = 'snapshots/SGN_Rene.h5' if model_type == 'SGN' else 'snapshots/combine.h5'
 
         # Validate epochs
         try:
@@ -470,6 +490,7 @@ def detect_custom():
     try:
         # Get uploaded model and image
         h5_file = request.files['h5_file']
+        model_type = request.form.get('model_type', 'SGN')  # Get model type from form
         upload_dir = app.config['UPLOAD_FOLDER']
         final_output = app.config['FINAL_OUTPUT_FOLDER']
         
@@ -486,9 +507,12 @@ def detect_custom():
         image_name = image_files[0]
         image_path = os.path.join(upload_dir, image_name)
 
+        # Choose the correct script based on model type
+        detection_script = 'scripts/custom_detection_color.py' if model_type == 'MADM' else 'scripts/custom_detection.py'
+
         # Run detection script
         subprocess.run([
-            'python3', 'scripts/custom_detection.py',
+            'python3', detection_script,
             image_path,
             model_path,
             final_output
@@ -525,5 +549,9 @@ def detect_custom():
         except:
             pass
 
+
+
+
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
