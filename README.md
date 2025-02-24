@@ -1,10 +1,11 @@
 
 # Automatic Cell Annotation Tool
 
-The primary objective is to enable biologists with little to no programming experience to deploy and use ML models for object detection purposes. A cell detection tool (mainly SGN and MADM) which allows a user to use object detection models to detect cells in a microscope image. 
+The primary objective is to enable biologists with little to no programming experience to deploy and use ML models for object detection purposes. A cell detection tool (mainly SGN and MADM) which allows a user to use object detection models to detect cells in a microscope image.
 
+The tool uses keras-retinanet for detection.
 
-
+![Screenshot](https://i.ibb.co/xSYWfQY5/image.png)
 
 ## Features
 
@@ -12,34 +13,49 @@ The primary objective is to enable biologists with little to no programming expe
 - Real time detection of cell count
 - You can add new annotations or remove the detected annotations after detection is completed
 - You can fine tune the model, either by uploading your own images and  corresponding annotations, or by using the images you have previously used on this tool.
-- Crop, zoom, brightness and contrast changes to adjust view of image.
+- Crop, zoom, brightness and contrast changes to adjust view of image. Can also change the threshold limit of brightness and contrast.
+
+## Installation (Linux Tested)
+
+
+1) Download the original keras-retinanet from [fizyr/keras-retinanet](https://github.com/fizyr/keras-retinanet). Place it in the app directory  
+Replace `./keras_retinanet/utils/image.py`, `./keras_retinanet/utils/colors.py`, and `./keras_retinanet/utils/gpu.py` with the py files provided in the repo.
+
+
+
+
+Check [here](https://docs.anaconda.com/anaconda/install/index.html) for Anaconda documentation.  
+Open Anaconda Prompt and create a virtual environment. I have already provided a conda environment environment.yml file which you can use to help get started.
+
+```bash
+conda env create -f environment.yml
+```
+
+then run
+
+```bash
+conda activate environment.yml
+```
+
+to be extra sure about having the required packages, run the following in the environment:
+
+```bash
+pip install -r requirements.txt
+```
+
+
+Go to the code directory, e.g. `.../keras-retinanet-main/`, in Anaconda Prompt.  
+Install keras-retinanet `pip install . --user`.  
+To run the code directly from the directory, run `python setup.py build_ext --inplace` to compile Cython code.
+
 
 
 
 
 ## Deployment
 
-To deploy this project run
+Before deploying the project, ensure you have the following directories. If not create them. The app should create them on their own, but for your own reference, these folders are essential for it to function. (They are empty at the start before starting it)
 
-```bash
-  python app.py
-```
-
-and then open
-```bash
-127.0.0.1:5000/static/index.html
-```
-
-you can also use your host static IP so that multiple computers on the same network can access it. Make sure firewall permissions are granted. You  can install the dependencies using the following
-```bash
-pip install -r requirements.txt
-```
-alternatively you can use the requirements.yml file. it is a copy of the conda environment I had used in development.
-```bash
-conda env create -f environment.yml
-```
-
-## Before Deploying App
 
 Make sure to have the following folders setup within the repo:
 - uploads
@@ -51,5 +67,37 @@ Make sure to have the following folders setup within the repo:
 - normalize
 - saved_annotations
 - saved_data
+- converted (has to be manually cleared. PNG images buildup over time)
+- finaloutput
+- snapshots (**IMPORTANT**)
 
-these are essential for the detection and retraining scripts scripts to run successfully.
+Download the following weights and copy them into the /snapshots directory:
+[SGN_Rene.h5](https://limewire.com/d/21ece669-2ecf-47d5-8c76-4a82d4ea6409#lz_cAuz3qnGRYJzK4QHnWCMZtslMmfEhi6MKoIbieO8)
+[combine.h5](https://limewire.com/d/4c918214-dc81-49e7-8e83-c91ae0041113#rvBEFBxoKI89fIBCB70rjSE9o3db2nDCMnPRFOH8dno)
+
+these are essential for the detection and retraining scripts scripts to run successfully. The tool makes use of these folders to store and transfer images, after which they are regularly cleared to prevent buildup/mixing of data.
+
+
+
+```bash
+  python app.py
+```
+
+Then open your browser, and open the following link:
+
+```bash
+127.0.0.1:5000/static/index.html
+```
+It is hosted on a static IP address, so anyone connected to the same network will be able to access the application. Just replace the localhost (127.0.0.1) IP address with the IP address of your hostname, keep everything else the same.
+Essentially, your directory should roughly look like this:
+
+
+
+![Screenshot](https://i.ibb.co/3yMfS0yF/image.png)
+
+
+## Acknowledgements
+
+ - [COMBINe: Cell detectiOn in Mouse BraIN](https://github.com/yccc12/COMBINe/tree/main)
+ - [keras-retinanet](https://github.com/fizyr/keras-retinanet)
+
