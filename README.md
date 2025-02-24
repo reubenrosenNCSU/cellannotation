@@ -72,8 +72,8 @@ Make sure to have the following folders setup within the repo:
 - snapshots (**IMPORTANT**)
 
 Download the following weights and copy them into the /snapshots directory:
-[SGN_Rene.h5](https://limewire.com/d/21ece669-2ecf-47d5-8c76-4a82d4ea6409#lz_cAuz3qnGRYJzK4QHnWCMZtslMmfEhi6MKoIbieO8)
-[combine.h5](https://limewire.com/d/4c918214-dc81-49e7-8e83-c91ae0041113#rvBEFBxoKI89fIBCB70rjSE9o3db2nDCMnPRFOH8dno)
+[SGN_Rene.h5](https://drive.google.com/file/d/10JCk6W6pC7nVWfHJ7Ew6xvyWLEeKxbV2/view?usp=sharing)
+[combine.h5](https://drive.google.com/file/d/1ADUyTbD1wxKvsMnuvF0YZr5K9Wn5iwk3/view?usp=sharing)
 
 these are essential for the detection and retraining scripts scripts to run successfully. The tool makes use of these folders to store and transfer images, after which they are regularly cleared to prevent buildup/mixing of data.
 
