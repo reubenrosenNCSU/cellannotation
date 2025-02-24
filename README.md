@@ -42,14 +42,14 @@ conda env create -f requirements.yml
 ## Before Deploying App
 
 Make sure to have the following folders setup within the repo:
--uploads
--images
--input
--output
--output/output_csv
--ft_upload
--normalize
--saved_annotations
--saved_data
+- uploads
+- images
+- input
+- output
+- output/output_csv
+- ft_upload
+- normalize
+- saved_annotations
+- saved_data
 
 these are essential for the detection and retraining scripts scripts to run successfully.
