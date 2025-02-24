@@ -1,0 +1,1 @@
+{"version":3,"file":"PresenceEvents.d.ts","sourceRoot":"","sources":["../../src/presence/PresenceEvents.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,WAAW,EAAE,MAAM,eAAe,CAAC;AAEjD,MAAM,WAAW,cAAc;IAE7B,QAAQ,EAAE,CAAC,KAAK,EAAE,WAAW,EAAE,KAAK,IAAI,CAAC;IAEzC,eAAe,EAAE,CAAC,IAAI,EAAE,WAAW,EAAE,SAAS,EAAE,MAAM,EAAE,GAAG,IAAI,KAAK,IAAI,CAAC;CAE1E"}

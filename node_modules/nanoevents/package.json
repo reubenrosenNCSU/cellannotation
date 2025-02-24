@@ -1,0 +1,29 @@
+{
+  "name": "nanoevents",
+  "version": "9.1.0",
+  "description": "Simple and tiny (107 bytes) event emitter library",
+  "keywords": [
+    "EventEmitter",
+    "Events",
+    "emit",
+    "emitter",
+    "event",
+    "pub/sub",
+    "publish",
+    "reactor",
+    "subscribe"
+  ],
+  "author": "Andrey Sitnik <andrey@sitnik.ru>",
+  "license": "MIT",
+  "repository": "ai/nanoevents",
+  "engines": {
+    "node": "^18.0.0 || >=20.0.0"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  }
+}

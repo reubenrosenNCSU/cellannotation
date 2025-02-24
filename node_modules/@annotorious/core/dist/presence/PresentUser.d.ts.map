@@ -1,0 +1,1 @@
+{"version":3,"file":"PresentUser.d.ts","sourceRoot":"","sources":["../../src/presence/PresentUser.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,IAAI,EAAE,MAAM,eAAe,CAAC;AAC1C,OAAO,KAAK,EAAE,UAAU,EAAE,MAAM,cAAc,CAAC;AAE/C,MAAM,WAAW,WAAY,SAAQ,IAAI;IAEvC,WAAW,EAAE,MAAM,CAAC;IAEpB,UAAU,EAAE,UAAU,CAAA;CAEvB"}

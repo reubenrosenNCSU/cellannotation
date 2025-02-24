@@ -1,0 +1,1 @@
+{"version":3,"file":"AnnotationState.d.ts","sourceRoot":"","sources":["../../src/model/AnnotationState.ts"],"names":[],"mappings":"AAAA,MAAM,WAAW,eAAe;IAE9B,QAAQ,CAAC,EAAE,OAAO,CAAC;IAEnB,OAAO,CAAC,EAAE,OAAO,CAAC;IAElB,MAAM,CAAC,EAAE;QAEP,CAAC,GAAG,EAAE,MAAM,GAAG,GAAG,CAAA;KAEnB,CAAA;CAEF"}

@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Image Annotation Tool</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tiff.js@1.0.0/tiff.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+        }
+        .tooltip {
+    position: relative;
+    display: inline-block;
+}
+
+.tooltip::before {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    z-index: 1000;
+}
+
+.tooltip:hover::before {
+    opacity: 1;
+}
+        .toolbar {
+    width: 220px;
+    background-color: #f4f4f4;
+    padding: 15px;
+    overflow-y: auto;
+    position: fixed; /* Keep toolbar over content */
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 100; /* Ensure toolbar stays on top */
+    box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+}
+.threshold-input {
+        padding: 2px;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+        font-size: 12px;
+    }
+    
+    .slider-container {
+        margin: 15px 0;
+    }
+    
+    .slider {
+        flex: 1; /* Makes slider take up remaining space between threshold inputs */
+    }
+.canvas-container {
+    margin-left: 220px; /* Offset for toolbar */
+    height: 100vh;
+    overflow: auto; /* Allow scrolling for large images */
+}
+.cell-count {
+    margin: 10px 0;
+    padding: 8px;
+    background: #e8e8e8;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+canvas {
+    cursor: crosshair;
+    touch-action: none;
+    display: block;
+    /* Remove all max-width/max-height constraints */
+
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin: 8px 0;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .btn:hover {
+            background: #45a049;
+        }
+        .btn.active {
+            background: #2196F3;
+        }
+        .slider-container {
+            margin: 15px 0;
+        }
+        .slider {
+            width: 100%;
+            margin: 5px 0;
+        }
+        input[type="file"] {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <h3>Annotation Tool</h3>
+        
+        <input type="file" id="image-input" accept="image/*">
+        <button class="btn tooltip" data-tooltip="Load an .tif/.tiff file into the tool" id="load-image-btn">Load Image</button>
+        
+        <div class="slider-container">
+            <label>Class:</label>
+            <select id="class-select" class="btn">
+                <option value="0">SGN</option>
+                <option value="1">yellow neuron</option>
+                <option value="2">yellow astrocyte</option>
+                <option value="3">green neuron</option>
+                <option value="4">green astrocyte</option>
+                <option value="5">red neuron</option>
+                <option value="6">red astrocyte</option>
+            </select>
+        </div>
+
+        <button class="btn tooltip" data-tooltip="Select Region of Interest (ROI)" id="crop-btn">Crop Image</button>
+        <button class="btn tooltip" data-tooltip="Toggle on/off zoom mode" id="zoom-btn">Toggle Zoom</button>
+        
+        <div class="slider-container">
+            <label>Brightness:</label>
+            <div style="display: flex; gap: 5px; margin: 5px 0;">
+                <input type="number" id="brightness-min" class="threshold-input" 
+                       value="-100" step="1" style="width: 60px;">
+                <input type="range" id="brightness" class="slider" min="-100" max="100" value="0">
+                <input type="number" id="brightness-max" class="threshold-input" 
+                       value="100" step="1" style="width: 60px;">
+            </div>
+        </div>
+        
+        <div class="slider-container">
+            <label>Contrast:</label>
+            <div style="display: flex; gap: 5px; margin: 5px 0;">
+                <input type="number" id="contrast-min" class="threshold-input" 
+                       value="-100" step="1" style="width: 60px;">
+                <input type="range" id="contrast" class="slider" min="-100" max="100" value="0">
+                <input type="number" id="contrast-max" class="threshold-input" 
+                       value="100" step="1" style="width: 60px;">
+            </div>
+        </div>
+
+        <button class="btn tooltip" data-tooltip="Save the Annotations before exporting" id="save-annotations-btn">Save Annotations</button>
+        <button class="btn tooltip" data-tooltip="Export saved annotations (csv)" id="export-annotations-btn">Export Annotations</button>
+        <button class="btn tooltip" data-tooltip="Import (.csv)" id="import-annotations-btn">Import Annotations</button>
+        <div style="margin-top: 20px;">
+            <div>Imported Cells: <span id="imported-cell-count">0</span></div>
+            <div>Current Cells: <span id="current-cell-count">0</span></div>
+        </div>
+        <button class="btn tooltip" data-tooltip="Detect SGN cells" id="detect-sgn-btn">Detect SGN</button>
+        <button class="btn tooltip" data-tooltip="Detect MADM cells" id="detect-madm-btn">Detect MADM</button>
+        <button class="btn tooltip" data-tooltip="Save as PNG" id="save-image-btn">Save Image</button>
+        <button class="btn tooltip" data-tooltip="Use this before retraining on saved data" id="clear-training-data-btn" style="background-color: red;"> Clear Training Data</button>
+        <button class="btn tooltip" data-tooltip="Save data for retraining" id="save-training-data-btn">Save Training Data</button>
+        <button class="btn tooltip" data-tooltip="Upload data to retrain" id="fine-tune-btn">Fine Tune (Custom)</button>
+        <button class="btn tooltip" data-tooltip="Retrain on saved data" id="fine-tune-saved-btn">Fine Tune (Saved Data)</button>
+        <button class="btn tooltip" data-tooltip="Load image and test with a custom model" id="custom-detect-btn">Custom Detect</button>
+    </div>
+
+    <div class="canvas-container">
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const CLASS_NAMES = [
+            'SGN', 
+            'yellow neuron', 
+            'yellow astrocyte',
+            'green neuron', 
+            'green astrocyte', 
+            'red neuron',   
+            'red astrocyte'   
+        ];
+
+            const COLORS = [
+                '#808080', // 0. SGN (Gray)
+                '#FFD700', // 1. Yellow Neuron (Gold)
+                '#FFA500', // 2. Yellow Astrocyte (Orange)
+                '#32CD32', // 3. Green Neuron (Lime Green)
+                '#006400', // 4. Green Astrocyte (Dark Green)
+                '#FF0000', // 5. Red Neuron (Bright Red)
+                '#8B0000'  // 6. Red Astrocyte (Dark Red)
+            ];
+
+            // State Management
+            let state = {
+                image: null,
+                annotations: [],
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+                isDrawing: false,
+                isCropping: false,
+                isZoomMode: false,
+                currentClass: 0,
+                cropStart: null,
+                panStart: null,
+                imageName: 'image.tiff',
+                naturalSize: { width: 0, height: 0 }
+            };
+
+            // DOM Elements
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+
+            const classSelect = document.getElementById('class-select');
+            const loadImageBtn = document.getElementById('load-image-btn');
+            const imageInput = document.getElementById('image-input');
+            const importedCellCount = document.getElementById('imported-cell-count');
+            const currentCellCount = document.getElementById('current-cell-count');
+            const brightness = document.getElementById('brightness');
+            const brightnessMin = document.getElementById('brightness-min');
+            const brightnessMax = document.getElementById('brightness-max');
+            const contrast = document.getElementById('contrast');
+            const contrastMin = document.getElementById('contrast-min');
+            const contrastMax = document.getElementById('contrast-max');
+
+            // Event Listeners
+            loadImageBtn.addEventListener('click', () => imageInput.click());
+            imageInput.addEventListener('change', handleImageUpload);
+            classSelect.addEventListener('change', e => state.currentClass = +e.target.value);
+            document.getElementById('crop-btn').addEventListener('click', toggleCropping);
+            document.getElementById('zoom-btn').addEventListener('click', toggleZoom);
+            document.getElementById('save-annotations-btn').addEventListener('click', saveAnnotations);
+            document.getElementById('export-annotations-btn').addEventListener('click', exportAnnotations);
+            document.getElementById('import-annotations-btn').addEventListener('click', importAnnotations);
+            document.getElementById('save-image-btn').addEventListener('click', saveImage);
+            brightness.addEventListener('input', redraw);
+            contrast.addEventListener('input', redraw);
+            brightnessMin.addEventListener('change', updateBrightnessRange);
+            brightnessMax.addEventListener('change', updateBrightnessRange);
+            contrastMin.addEventListener('change', updateContrastRange);
+            contrastMax.addEventListener('change', updateContrastRange);
+
+            // Canvas Events
+            canvas.addEventListener('mousedown', handleMouseDown);
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.addEventListener('mouseup', handleMouseUp);
+            canvas.addEventListener('wheel', handleWheel);
+            canvas.addEventListener('contextmenu', handleRightClick);
+
+            document.getElementById('fine-tune-saved-btn').addEventListener('click', () => {
+            document.getElementById('saved-train-modal').style.display = 'block';
+        });
+
+        function updateBrightnessRange() {
+            let min = parseInt(brightnessMin.value);
+            let max = parseInt(brightnessMax.value);
+            
+            // Ensure min < max and validate reasonable range
+            if (min >= max) {
+                min = max - 1;
+                brightnessMin.value = min;
+            }
+            
+            brightness.min = min;
+            brightness.max = max;
+            
+            // Ensure current value stays within new range
+            let current = parseInt(brightness.value);
+            if (current < min) brightness.value = min;
+            if (current > max) brightness.value = max;
+            
+            redraw();
+        }
+
+        function updateContrastRange() {
+            let min = parseInt(contrastMin.value);
+            let max = parseInt(contrastMax.value);
+            
+            if (min >= max) {
+                min = max - 1;
+                contrastMin.value = min;
+            }
+            
+            contrast.min = min;
+            contrast.max = max;
+            
+            let current = parseInt(contrast.value);
+            if (current < min) contrast.value = min;
+            if (current > max) contrast.value = max;
+            
+            redraw();
+        }
+
+        // CUSTOM DETECTION CODE
+        document.getElementById('custom-detect-btn').addEventListener('click', () => {
+            document.getElementById('custom-detect-modal').style.display = 'block';
+        });
+
+        document.getElementById('custom-model-file').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            document.getElementById('selected-model-name').textContent = file ? file.name : 'No file selected';
+        });
+
+        document.getElementById('run-custom-detect').addEventListener('click', async () => {
+            try {
+                const modelType = document.getElementById('custom-model-type').value;
+                const modelFile = document.getElementById('custom-model-file').files[0];
+                
+                if (!modelFile) {
+                    alert('Please select a .h5 model file!');
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('model_type', modelType);
+                formData.append('h5_file', modelFile);
+
+                const response = await axios.post('/detect-custom', formData, {
+                    headers: {'Content-Type': 'multipart/form-data'}
+                });
+                
+
+
+                // Process CSV data
+                const csvData = response.data.annotations;
+                    const lines = csvData.split('\n');
+                    
+                    state.annotations = [];
+                    let importedCount = 0;
+
+                    lines.forEach(line => {
+                        if (!line.trim()) return;
+                        const [filename, x1Str, y1Str, x2Str, y2Str, className] = line.split(',');  // Same as import
+                        
+                        // Identical coordinate handling
+                        let x1 = parseFloat(x1Str);
+                        let y1 = parseFloat(y1Str);
+                        let x2 = parseFloat(x2Str);
+                        let y2 = parseFloat(y2Str);
+                        [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
+
+                        const classIndex = CLASS_NAMES.indexOf(className.trim());
+                        if (classIndex === -1) return;
+
+                        state.annotations.push({
+                            x: x1,
+                            y: y1,
+                            width: x2 - x1,
+                            height: y2 - y1,
+                            class: classIndex,
+                            isDetected: true
+                        });
+                        importedCount++;
+                    });
+                        // Merge overlapping boxes before updating state
+                        state.annotations = mergeOverlappingBoxes(state.annotations, 0.3, true);
+                        importedCount = state.annotations.length;
+
+                    updateCellCounts(importedCount);
+                    redraw();
+                    alert(`Successfully detected ${importedCount} objects!`);
+
+                } catch (error) {
+                console.error('Custom detection error:', error);
+                alert('Detection failed: ' + (error.response?.data?.error || error.message));
+            }
+        });
+
+        // NEW: Coordinate sanitization utility
+        function sanitizeBox(x1, y1, x2, y2) {
+            // Ensure x1 <= x2 and y1 <= y2
+            const newX1 = Math.min(x1, x2);
+            const newY1 = Math.min(y1, y2);
+            const newX2 = Math.max(x1, x2);
+            const newY2 = Math.max(y1, y2);
+            return [newX1, newY1, newX2, newY2];
+        }
+        // Calculate Intersection over Union (IoU) between two boxes
+        function calculateIoU(boxA, boxB) {
+            const xA = Math.max(boxA.x, boxB.x);
+            const yA = Math.max(boxA.y, boxB.y);
+            const xB = Math.min(boxA.x + boxA.width, boxB.x + boxB.width);
+            const yB = Math.min(boxA.y + boxA.height, boxB.y + boxB.height);
+            const interArea = Math.max(0, xB - xA) * Math.max(0, yB - yA);
+            const boxAArea = boxA.width * boxA.height;
+            const boxBArea = boxB.width * boxB.height;
+            return interArea / (boxAArea + boxBArea - interArea);
+        }
+
+        // Merge overlapping boxes using DBSCAN clustering
+        function mergeOverlappingBoxes(annotations, iouThreshold = 0.3, multiClass = false) {
+    const merged = [];
+    
+    // Group annotations by class if multiClass is true
+    const classGroups = multiClass ? 
+        Object.groupBy(annotations, a => a.class) :
+        { all: annotations };
+
+    for (const [classKey, group] of Object.entries(classGroups)) {
+        const classMerged = [];
+        const visited = new Array(group.length).fill(false);
+        
+        group.forEach((ann, index) => {
+            if (!visited[index]) {
+                visited[index] = true;
+                const cluster = [ann];
+                
+                let queue = [ann];
+                while (queue.length > 0) {
+                    const current = queue.shift();
+                    group.forEach((other, otherIndex) => {
+                        if (!visited[otherIndex] && 
+                            calculateIoU(current, other) > iouThreshold) {
+                            visited[otherIndex] = true;
+                            cluster.push(other);
+                            queue.push(other);
+                        }
+                    });
+                }
+                
+                const x1 = Math.min(...cluster.map(b => b.x));
+                const y1 = Math.min(...cluster.map(b => b.y));
+                const x2 = Math.max(...cluster.map(b => b.x + b.width));
+                const y2 = Math.max(...cluster.map(b => b.y + b.height));
+                
+                classMerged.push({
+                    x: x1,
+                    y: y1,
+                    width: x2 - x1,
+                    height: y2 - y1,
+                    class: ann.class, // Preserve original class
+                    isDetected: true
+                });
+            }
+        });
+        
+        merged.push(...classMerged);
+    }
+    
+    return merged;
+}
+        // Handle saved data training
+        window.startSavedTraining = async function() {
+            try {
+                const modelType = document.getElementById('saved-model-type').value;
+                const epochs = document.getElementById('saved-epochs').value;
+
+                if (!epochs || epochs < 1) {
+                    alert('Please enter valid number of epochs!');
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('model_type', modelType);
+                formData.append('epochs', epochs);
+
+                const response = await axios.post('/train-saved', formData, {
+                responseType: 'blob'  // MUST BE SET
+            });
+
+            const blob = new Blob([response.data], {type: 'application/octet-stream'});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = response.headers['content-disposition']
+                .split('filename=')[1]
+                .replace(/"/g, '');
+            link.click();
+                
+                document.getElementById('saved-train-modal').style.display = 'none';
+            } catch (error) {
+                alert('Training failed: ' + (error.response?.data?.error || error.message));
+            }
+        };
+
+            document.getElementById('detect-madm-btn').addEventListener('click', detectMADM);
+
+            async function detectMADM() {
+    try {
+        const response = await axios.post('/detect-madm');
+        const csvData = response.data.annotations;
+        
+        let rawAnnotations = [];
+        let importedCount = 0;
+
+        // Add this line to split CSV data into lines
+        const lines = csvData.split('\n');
+
+        lines.forEach(line => {
+            if (!line.trim()) return;
+            const [filename, x1Str, y1Str, x2Str, y2Str, className] = line.split(',');
+            
+            let x1 = parseFloat(x1Str);
+            let y1 = parseFloat(y1Str);
+            let x2 = parseFloat(x2Str);
+            let y2 = parseFloat(y2Str);
+            [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
+
+            const classIndex = CLASS_NAMES.indexOf(className);
+            if (classIndex === -1) return;
+            
+            rawAnnotations.push({
+                x: x1,
+                y: y1,
+                width: x2 - x1,
+                height: y2 - y1,
+                class: classIndex,
+                isDetected: true
+            });
+            importedCount++;
+        });
+
+        // Apply merging to MADM results
+        state.annotations = mergeOverlappingBoxes(rawAnnotations, 0.3, true);
+        const finalCount = state.annotations.length;
+        updateCellCounts(finalCount);
+        redraw();
+        alert(`Detected ${importedCount} objects, merged to ${state.annotations.length} after processing!`);
+
+    } catch (error) {
+        alert('Detection failed: ' + 
+            (error.response?.data?.error || error.message));
+    }
+}
+
+
+            document.getElementById('clear-training-data-btn').addEventListener('click', clearTrainingData);
+
+            async function clearTrainingData() {
+                try {
+                    const confirm = window.confirm('Are you sure you want to delete all training data? This cannot be undone!');
+                    if (!confirm) return;
+
+                    await axios.post('/clear-training-data');
+                    alert('All training data has been cleared!');
+                } catch (error) {
+                    alert('Error clearing training data: ' + error.message);
+                }
+            }
+
+            document.getElementById('save-training-data-btn').addEventListener('click', saveTrainingData);
+
+            async function saveTrainingData() {
+    if (!state.image) {
+        alert('Please load an image first!');
+        return;
+    }
+
+    try {
+        const formData = new FormData();
+        const originalFilename = `${state.imageName}.${state.originalExtension}`;
+        
+        // Add processing parameters
+        formData.append('original_filename', originalFilename);
+        formData.append('brightness', brightness.value);
+        formData.append('contrast', contrast.value);
+
+        // Create CSV data
+        const csvData = state.annotations.map(ann => {
+            let x1 = Math.round(ann.x);
+            let y1 = Math.round(ann.y);
+            let x2 = Math.round(ann.x + ann.width);
+            let y2 = Math.round(ann.y + ann.height);
+            [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
+            return `${originalFilename},${x1},${y1},${x2},${y2},${CLASS_NAMES[ann.class]}`;
+        }).join('\n');
+
+        formData.append('csv', new Blob([csvData], { type: 'text/csv' }), 'annotations.csv');
+
+        await axios.post('/save-training-data', formData);
+        alert('Training data saved successfully!');
+    } catch (error) {
+        alert('Error saving training data: ' + error.message);
+    }
+}
+
+
+
+
+            document.getElementById('detect-sgn-btn').addEventListener('click', detectSGN);
+
+            async function detectSGN() {
+    try {
+        const response = await axios.post('/detect-sgn');
+        const csvData = response.data.annotations;
+        
+        // Parse and import the annotations
+        const lines = csvData.split('\n');
+        let rawAnnotations = [];
+        let importedCount = 0;
+
+        lines.forEach(line => {
+            if (!line.trim()) return;
+            const [filename, x1Str, y1Str, x2Str, y2Str, className] = line.split(',');
+            
+            let x1 = parseFloat(x1Str);
+            let y1 = parseFloat(y1Str);
+            let x2 = parseFloat(x2Str);
+            let y2 = parseFloat(y2Str);
+            [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
+
+            const classIndex = CLASS_NAMES.indexOf(className);
+            if (classIndex === -1) return;
+            
+            rawAnnotations.push({
+                x: x1,
+                y: y1,
+                width: x2 - x1,
+                height: y2 - y1,
+                class: classIndex,
+                isDetected: true
+            });
+            importedCount++;
+        });
+
+        // Merge overlapping boxes before updating state
+        state.annotations = mergeOverlappingBoxes(rawAnnotations, 0.3, false);
+        const finalCount = state.annotations.length;
+        updateCellCounts(finalCount);
+        redraw();
+        alert(`Detected ${importedCount} objects, merged to ${state.annotations.length} after processing!`);
+
+    } catch (error) {
+        alert('Detection failed: ' + 
+            (error.response?.data?.error || error.message));
+    }
+}
+
+            async function handleImageUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const response = await axios.post('http://10.80.24.12:5000/upload', formData, {
+            headers: {'Content-Type': 'multipart/form-data'}
+        });
+
+        const data = response.data;
+        
+        // Update state with original file information
+        state.imageName = data.base_name;
+        state.originalExtension = data.original_extension;
+        
+        // Load converted PNG
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            state.image = img;
+            state.naturalSize = {
+                width: img.width,
+                height: img.height
+                
+            };
+            updateCellCounts(0);
+
+            canvas.width = state.naturalSize.width;
+            canvas.height = state.naturalSize.height;
+            resetView();
+            redraw();
+        };
+        img.src = data.converted_url;
+        
+    } catch (error) {
+        alert('Error uploading file: ' + error.message);
+    }
+}
+        function updateCellCounts(importedCount) {
+            if (importedCount !== undefined) {
+                importedCellCount.textContent = importedCount;
+            }
+            currentCellCount.textContent = state.annotations.length;
+        }
+
+            function loadTiffImage(buffer) {
+                const tiff = new Tiff({ buffer });
+                const img = tiff.toCanvas();
+                initializeImageState(img);
+            }
+
+            function loadRegularImage(src) {
+                const img = new Image();
+                img.onload = () => initializeImageState(img);
+                img.src = src;
+            }
+
+            function initializeImageState(img) {
+                state.image = img;
+                state.naturalSize = {
+                    width: img.width || img.naturalWidth,
+                    height: img.height || img.naturalHeight
+                };
+                canvas.width = state.naturalSize.width;
+                canvas.height = state.naturalSize.height;
+                resetView();
+                redraw();
+            }
+
+            function resetView() {
+                state.scale = 1;
+            state.offsetX = 0;
+            state.offsetY = 0;
+            brightness.value = 0;
+            contrast.value = 0;
+            // Reset to default range if desired
+            // brightnessMin.value = -100;
+            // brightnessMax.value = 100;
+            // contrastMin.value = -100;
+            // contrastMax.value = 100;
+            // updateBrightnessRange();
+            // updateContrastRange();
+            }
+
+            function redraw() {
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Apply transformations and filters
+                let brightVal = parseInt(brightness.value);
+                let contVal = parseInt(contrast.value);
+                
+                ctx.filter = `brightness(${100 + brightVal}%) 
+                            contrast(${100 + contVal}%)`;
+                ctx.setTransform(state.scale, 0, 0, state.scale, state.offsetX, state.offsetY);
+                
+                // Draw image
+                ctx.drawImage(state.image, 0, 0, state.naturalSize.width, state.naturalSize.height);
+                
+                // Draw annotations
+                state.annotations.forEach(ann => {
+                    ctx.strokeStyle = COLORS[ann.class];
+                    ctx.lineWidth = 2 / state.scale;
+
+                     // Set line style based on detection origin
+                    if (ann.isDetected) {
+                        ctx.setLineDash([5 / state.scale, 5 / state.scale]); // Dotted for detections
+                    } else {
+                        ctx.setLineDash([]); // Solid for manual drawings
+                    }
+                    ctx.strokeRect(ann.x, ann.y, ann.width, ann.height);
+                });
+
+                // Draw temporary shapes
+                if (state.isDrawing || state.isCropping) {
+                    const current = getTransformedPoint(lastX, lastY);
+                    ctx.strokeStyle = state.isCropping ? 'blue' : COLORS[state.currentClass];
+                    ctx.setLineDash([5 / state.scale]);
+                    ctx.strokeRect(
+                        Math.min(startX, current.x),
+                        Math.min(startY, current.y),
+                        Math.abs(current.x - startX),
+                        Math.abs(current.y - startY)
+                    );
+                }
+
+                ctx.restore();
+            }
+
+            // Coordinate Transformation
+            function getTransformedPoint(x, y) {
+                return {
+                    x: (x - state.offsetX) / state.scale,
+                    y: (y - state.offsetY) / state.scale
+                };
+            }
+
+            // Mouse Handlers
+            let lastX = 0, lastY = 0, startX = 0, startY = 0;
+
+            function handleMouseDown(e) {
+                const rect = canvas.getBoundingClientRect();
+                lastX = e.clientX - rect.left;
+                lastY = e.clientY - rect.top;
+                
+                if (state.isZoomMode && e.button === 0) {
+                    state.panStart = { x: lastX, y: lastY };
+                } else if (state.isCropping) {
+                    const { x, y } = getTransformedPoint(lastX, lastY);
+                    startX = x;
+                    startY = y;
+                } else if (e.button === 0) {
+                    const { x, y } = getTransformedPoint(lastX, lastY);
+                    startX = x;
+                    startY = y;
+                    state.isDrawing = true;
+                }
+            }
+
+            function handleMouseMove(e) {
+                const rect = canvas.getBoundingClientRect();
+                lastX = e.clientX - rect.left;
+                lastY = e.clientY - rect.top;
+
+                if (state.panStart) {
+                    state.offsetX += lastX - state.panStart.x;
+                    state.offsetY += lastY - state.panStart.y;
+                    state.panStart = { x: lastX, y: lastY };
+                    redraw();
+                } else if (state.isDrawing || state.isCropping) {
+                    redraw();
+                }
+            }
+
+            function handleMouseUp(e) {
+                if (state.panStart) {
+                    state.panStart = null;
+                    return;
+                }
+
+                const { x, y } = getTransformedPoint(lastX, lastY);
+                const [x1, y1, x2, y2] = sanitizeBox(startX, startY, x, y);
+                
+                if (state.isCropping) {
+                    cropImage(x1, y1, x2 - x1, y2 - y1);
+                    state.isCropping = false;
+                    document.getElementById('crop-btn').classList.remove('active');
+                } else if (state.isDrawing) {
+                    state.annotations.push({
+                        x: x1,
+                        y: y1,
+                        width: x2 - x1,  // Always positive
+                        height: y2 - y1, // Always positive
+                        class: state.currentClass
+                    });
+                    updateCellCounts();
+                    state.isDrawing = false;
+                }
+                
+                redraw();
+            }
+            function handleWheel(e) {
+                if (!state.isZoomMode) return;
+                
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                const { x, y } = getTransformedPoint(e.offsetX, e.offsetY);
+                
+                state.scale *= delta;
+                state.scale = Math.min(Math.max(0.1, state.scale), 10);
+                state.offsetX = e.offsetX - x * state.scale;
+                state.offsetY = e.offsetY - y * state.scale;
+                
+                redraw();
+            }
+
+            function handleRightClick(e) {
+                e.preventDefault();
+                const { x, y } = getTransformedPoint(e.offsetX, e.offsetY);
+                
+                state.annotations = state.annotations.filter(ann => 
+                    !(x >= ann.x && x <= ann.x + ann.width &&
+                      y >= ann.y && y <= ann.y + ann.height)
+                );
+                updateCellCounts();
+                redraw();
+            }
+
+            // Annotation Operations
+            function exportAnnotations() {
+                const filename = `${state.imageName}.${state.originalExtension}`;  // Preserve original name & extension
+                const csv = [
+                    
+                    ...state.annotations.map(ann => {
+                        let x1 = Math.round(ann.x);
+                        let y1 = Math.round(ann.y);
+                        let x2 = Math.round(ann.x + ann.width);
+                        let y2 = Math.round(ann.y + ann.height);
+                        [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2); // Final check
+                        return `${filename},${x1},${y1},${x2},${y2},${CLASS_NAMES[ann.class]}`;
+                    })
+                ].join('\n');
+
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'annotations.csv';
+                link.click();
+            }
+
+            function importAnnotations() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.csv';
+            
+            input.onchange = e => {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                
+                reader.onload = e => {
+                    const lines = e.target.result.split('\n');
+                    state.annotations = [];
+                    let actualImported = 0;
+
+                    lines.forEach(line => {
+                        if (!line.trim()) return;
+                        const [filename, x1Str, y1Str, x2Str, y2Str, className] = line.split(',');
+                        
+                        // NEW: Convert and sanitize
+                        let x1 = parseFloat(x1Str);
+                        let y1 = parseFloat(y1Str);
+                        let x2 = parseFloat(x2Str);
+                        let y2 = parseFloat(y2Str);
+                        [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
+
+                        const classIndex = CLASS_NAMES.indexOf(className);
+                        if (classIndex === -1) return;
+
+                        state.annotations.push({
+                            x: x1,
+                            y: y1,
+                            width: x2 - x1,
+                            height: y2 - y1,
+                            class: classIndex,
+                            isDetected: true
+                        });
+                        actualImported++;
+                    });
+
+                    updateCellCounts(actualImported);
+                    redraw();
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        }
+
+
+        function saveAnnotations() {
+        localStorage.setItem('annotations', JSON.stringify({
+            annotations: state.annotations,
+            imageName: state.imageName,
+            originalExtension: state.originalExtension,
+            naturalSize: state.naturalSize
+        }));
+        updateCellCounts();  // Update current count display
+        alert('Annotations saved locally!');
+    }
+
+            function saveImage() {
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
+    
+    // Set to original image dimensions
+    tempCanvas.width = state.naturalSize.width;
+    tempCanvas.height = state.naturalSize.height;
+
+    // Apply current brightness/contrast
+    tempCtx.filter = `brightness(${100 + parseInt(brightness.value)}%) 
+                    contrast(${100 + parseInt(contrast.value)}%)`;
+    
+    // Draw base image with filters
+    tempCtx.drawImage(state.image, 0, 0, state.naturalSize.width, state.naturalSize.height);
+    
+    // Reset filter for annotations
+    tempCtx.filter = 'none';
+    
+    // Draw annotations
+    state.annotations.forEach(ann => {
+        tempCtx.strokeStyle = COLORS[ann.class];
+        tempCtx.lineWidth = 2;
+        tempCtx.strokeRect(ann.x, ann.y, ann.width, ann.height);
+    });
+
+    // Create download link
+    const link = document.createElement('a');
+    link.href = tempCanvas.toDataURL('image/png');
+    link.download = `annotated_${state.imageName}.png`;
+    link.click();
+}
+            // Image Operations
+            function cropImage(x, y, width, height) {
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = width;
+                tempCanvas.height = height;
+                const tempCtx = tempCanvas.getContext('2d');
+                
+                tempCtx.drawImage(
+                    state.image,
+                    x, y, width, height,
+                    0, 0, width, height
+                );
+
+                state.image = tempCanvas;
+                state.naturalSize = { width, height };
+                state.annotations = state.annotations
+                    .filter(ann => 
+                        ann.x >= x && ann.x + ann.width <= x + width &&
+                        ann.y >= y && ann.y + ann.height <= y + height
+                    )
+                    .map(ann => ({
+                        x: ann.x - x,
+                        y: ann.y - y,
+                        width: ann.width,
+                        height: ann.height,
+                        class: ann.class
+                    }));
+                    updateCellCounts();
+
+                canvas.width = width;
+                canvas.height = height;
+                resetView();
+                redraw();
+            }
+
+            // UI Toggles
+            function toggleCropping() {
+                state.isCropping = !state.isCropping;
+                this.classList.toggle('active', state.isCropping);
+            }
+
+            function toggleZoom() {
+                state.isZoomMode = !state.isZoomMode;
+                this.classList.toggle('active', state.isZoomMode);
+            }
+        });
+    </script>
+    <div id="train-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; z-index: 1000;">
+        <h3>Training Setup</h3>
+        
+        <select id="model-type" class="btn">
+            <option value="SGN">SGN</option>
+            <option value="MADM">MADM</option>
+        </select>
+        <input type="number" id="epochs" class="btn" placeholder="Epochs" value="10" min="1" style="margin: 10px 0; width: 100%">
+        <button class="btn" onclick="document.getElementById('train-csv').click()">Upload CSV</button>
+        <input type="file" id="train-csv" hidden accept=".csv">
+        
+        <button class="btn" onclick="document.getElementById('train-images').click()">Upload Images</button>
+        <input type="file" id="train-images" hidden multiple accept="image/*">
+        
+        <button class="btn" onclick="startTraining()">Start Training</button>
+        <button class="btn" onclick="document.getElementById('train-modal').style.display = 'none'">Close</button>
+    </div>
+    <script>
+        let trainingFiles = {
+    csv: null,
+    images: []
+};
+
+// File handlers
+document.getElementById('train-csv').addEventListener('change', function(e) {
+    trainingFiles.csv = e.target.files[0];
+});
+document.getElementById('train-images').addEventListener('change', function(e) {
+    trainingFiles.images = Array.from(e.target.files);
+});
+
+// Training function
+window.startTraining = async function() {
+    const epochs = document.getElementById('epochs').value;
+    if (!epochs || epochs < 1) {
+        alert('Please enter valid number of epochs!');
+    }
+    if (!trainingFiles.csv || trainingFiles.images.length === 0) {
+        alert('Please upload both CSV and images!');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('model_type', document.getElementById('model-type').value);
+    formData.append('csv', trainingFiles.csv);
+    formData.append('epochs', epochs);
+    trainingFiles.images.forEach(img => formData.append('images', img));
+
+    try {
+        const response = await axios.post('/train', formData, {
+            responseType: 'blob'  // Add this line
+        });
+
+        // REPLACE THE DOWNLOAD CODE WITH THIS
+        const blob = new Blob([response.data], {type: 'application/octet-stream'});
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = response.headers['content-disposition']
+                          .split('filename=')[1]
+                          .replace(/"/g, '');
+        link.click();
+    } catch (error) {
+        alert('Error: ' + (error.response?.data || error.message));
+    }
+};
+
+// Show modal
+document.getElementById('fine-tune-btn').addEventListener('click', () => {
+    document.getElementById('train-modal').style.display = 'block';
+});
+
+    </script>
+<div id="saved-train-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; z-index: 1000;">
+    <h3>Train with Saved Data</h3>
+    
+    <select id="saved-model-type" class="btn">
+        <option value="SGN">SGN</option>
+        <option value="MADM">MADM</option>
+    </select>
+    
+    <input type="number" id="saved-epochs" class="btn" 
+           placeholder="Epochs" value="20" min="1" 
+           style="margin: 10px 0; width: 100%">
+    
+    <button class="btn" onclick="startSavedTraining()">Start Training</button>
+    <button class="btn" onclick="document.getElementById('saved-train-modal').style.display = 'none'">
+        Close
+    </button>
+</div>
+<!-- ADD THIS CUSTOM DETECT MODAL -->
+<div id="custom-detect-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; z-index: 1000; border: 1px solid #ccc;">
+    <h3 style="margin-top: 0;">Custom Detection</h3>
+    
+    <div style="margin-bottom: 15px;">
+        <select id="custom-model-type" class="btn" style="width: 100%;">
+            <option value="SGN">SGN Model</option>
+            <option value="MADM">MADM Model</option>
+        </select>
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+        <label class="btn" style="display: block; background: #4CAF50; color: white;">
+            Upload Model (.h5)
+            <input type="file" id="custom-model-file" accept=".h5" hidden>
+        </label>
+        <div id="selected-model-name" style="margin-top: 5px; font-size: 0.9em;"></div>
+    </div>
+    
+    <div style="display: flex; gap: 10px;">
+        <button class="btn" id="run-custom-detect" style="flex: 1;">Detect</button>
+        <button class="btn" onclick="document.getElementById('custom-detect-modal').style.display = 'none'" style="flex: 1; background: #666;">Close</button>
+    </div>
+</div>
+</body>
+</html>

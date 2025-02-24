@@ -1,0 +1,1 @@
+{"version":3,"file":"PresenceProvider.d.ts","sourceRoot":"","sources":["../../src/presence/PresenceProvider.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,cAAc,EAAE,MAAM,kBAAkB,CAAC;AAEvD,MAAM,WAAW,gBAAgB;IAE/B,EAAE,CAAC,CAAC,SAAS,MAAM,cAAc,EAAE,KAAK,EAAE,CAAC,EAAE,QAAQ,EAAE,cAAc,CAAC,CAAC,CAAC,GAAG,IAAI,CAAC;CAEjF"}
