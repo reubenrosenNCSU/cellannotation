@@ -7,7 +7,7 @@ import os
 sys.path.insert(0, "/home/greenbaumgpu/Reuben/js_annotation")
 
 # 2. Import your modified utils/image.py BEFORE other keras_retinanet modules
-from keras_retinanet.utils.image import read_image_bgr, preprocess_image, resize_image
+from keras_retinanet.utils.image import resize_image
 import keras
 import sys
 import matplotlib.pyplot as plt
@@ -25,6 +25,55 @@ import numpy as np
 from scipy.io import loadmat
 
 # %% Functions
+
+def read_image_bgr(path):
+    """ Read an image in BGR format.
+
+    Args
+        path: Path to the image.
+    """
+    #image = np.asarray(Image.open(path).convert('RGB')) #modified
+    image = cv2.imread(path, cv2.IMREAD_UNCHANGED) # modified for uint16 input
+    if len(image.shape) == 2:
+        H, W = image.shape
+        tmp = np.zeros((H,W,3))
+        tmp[:,:,2] = image #copying red channel into empty tmp img array
+        tmp[:,:,1] = image #copying green channel into empty tmp img array
+        image = tmp
+    else:
+        image=image #if image is already bgr, leave it unchanged
+    return image # BGR
+
+def preprocess_image(x, mode='caffe', dynamic=False):
+    """Preprocess an image with fixed or dynamic normalization.
+
+    Args:
+        x: np.array of shape (H, W, 3) or (3, H, W).
+        mode: 'caffe' or 'tf'.
+        dynamic: if True (for SGN), use dynamic normalization;
+                 if False (for MADM), use fixed normalization.
+    """
+    # Convert to float32 for compatibility
+    x = x.astype(np.float32)
+
+    if mode == 'tf':
+        x /= 127.5
+        x -= 1.
+    elif mode == 'caffe':
+        if dynamic:
+            # Dynamic normalization for SGN:
+            for i in range(x.shape[-1]):
+                if x[..., i].sum() > 0:
+                    mean = x[..., i].mean()
+                    std = x[..., i].std()
+                    x[..., i] = ((x[..., i] - mean) / std) * 127.5
+        else:
+            # Fixed normalization for MADM:
+            x /= 257.  # assumes uint16 input
+            x -= [103.939, 116.779, 123.68]
+
+    return x
+
 
 def listFile(path, ext):
     '''    
