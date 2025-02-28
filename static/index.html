@@ -120,7 +120,7 @@ canvas {
     <div class="toolbar">
         <h3>Annotation Tool</h3>
         
-        <input type="file" id="image-input" accept="image/*">
+        <input type="file" id="image-input" accept=".tiff,.tif">
         <button class="btn tooltip" data-tooltip="Load an .tif/.tiff file into the tool" id="load-image-btn">Load Image</button>
         
         <div class="slider-container">
@@ -213,6 +213,7 @@ canvas {
                 offsetY: 0,
                 isDrawing: false,
                 isCropping: false,
+                isCropStarted: false, // New flag to track if cropping has begun
                 isZoomMode: false,
                 currentClass: 0,
                 cropStart: null,
@@ -639,25 +640,33 @@ canvas {
     }
 }
 
-            async function handleImageUpload(e) {
+async function handleImageUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
 
+    // Check if the file has a .tiff or .tif extension
+    if (!file.name.toLowerCase().endsWith('.tiff') && !file.name.toLowerCase().endsWith('.tif')) {
+        alert('Only .tiff and .tif files are accepted.');
+        e.target.value = ''; // Clear the file input
+        return;
+    }
+
+    // Proceed with uploading the valid file
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-        const response = await axios.post('http://10.80.24.12:5000/upload', formData, {
-            headers: {'Content-Type': 'multipart/form-data'}
+        const response = await axios.post('/upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
         });
 
         const data = response.data;
-        
+
         // Update state with original file information
         state.imageName = data.base_name;
         state.originalExtension = data.original_extension;
-        
-        // Load converted PNG
+
+        // Load the converted PNG image
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
@@ -665,17 +674,22 @@ canvas {
             state.naturalSize = {
                 width: img.width,
                 height: img.height
-                
             };
-            updateCellCounts(0);
 
+            // Reset annotations and related data
+            state.annotations = [];  // Clear previous annotations
+            updateCellCounts(0);    // Reset cell count to 0
+
+            // Set canvas size to match the new image
             canvas.width = state.naturalSize.width;
             canvas.height = state.naturalSize.height;
+
+            // Reset view and redraw the canvas
             resetView();
             redraw();
         };
         img.src = data.converted_url;
-        
+
     } catch (error) {
         alert('Error uploading file: ' + error.message);
     }
@@ -727,49 +741,67 @@ canvas {
             }
 
             function redraw() {
-                ctx.save();
-                ctx.setTransform(1, 0, 0, 1, 0, 0);
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Apply transformations and filters
+            let brightVal = parseInt(brightness.value);
+            let contVal = parseInt(contrast.value);
+            
+            ctx.filter = `brightness(${100 + brightVal}%) 
+                        contrast(${100 + contVal}%)`;
+            ctx.setTransform(state.scale, 0, 0, state.scale, state.offsetX, state.offsetY);
+            
+            // Draw image
+            ctx.drawImage(state.image, 0, 0, state.naturalSize.width, state.naturalSize.height);
+            
+            // Draw annotations
+            state.annotations.forEach(ann => {
+                // Fill with semi-transparent color
+                ctx.fillStyle = hexToRGBA(COLORS[ann.class], 0.3); // 30% opacity
+                ctx.fillRect(ann.x, ann.y, ann.width, ann.height);
                 
-                // Apply transformations and filters
-                let brightVal = parseInt(brightness.value);
-                let contVal = parseInt(contrast.value);
-                
-                ctx.filter = `brightness(${100 + brightVal}%) 
-                            contrast(${100 + contVal}%)`;
-                ctx.setTransform(state.scale, 0, 0, state.scale, state.offsetX, state.offsetY);
-                
-                // Draw image
-                ctx.drawImage(state.image, 0, 0, state.naturalSize.width, state.naturalSize.height);
-                
-                // Draw annotations
-                state.annotations.forEach(ann => {
-                    ctx.strokeStyle = COLORS[ann.class];
-                    ctx.lineWidth = 2 / state.scale;
-
-                     // Set line style based on detection origin
-                    if (ann.isDetected) {
-                        ctx.setLineDash([5 / state.scale, 5 / state.scale]); // Dotted for detections
-                    } else {
-                        ctx.setLineDash([]); // Solid for manual drawings
-                    }
-                    ctx.strokeRect(ann.x, ann.y, ann.width, ann.height);
-                });
-
-                // Draw temporary shapes
-                if (state.isDrawing || state.isCropping) {
-                    const current = getTransformedPoint(lastX, lastY);
-                    ctx.strokeStyle = state.isCropping ? 'blue' : COLORS[state.currentClass];
-                    ctx.setLineDash([5 / state.scale]);
-                    ctx.strokeRect(
-                        Math.min(startX, current.x),
-                        Math.min(startY, current.y),
-                        Math.abs(current.x - startX),
-                        Math.abs(current.y - startY)
-                    );
+                // Stroke the border
+                ctx.strokeStyle = COLORS[ann.class];
+                ctx.lineWidth = 2 / state.scale;
+                if (ann.isDetected) {
+                    ctx.setLineDash([5 / state.scale, 5 / state.scale]);
+                } else {
+                    ctx.setLineDash([]);
                 }
+                ctx.strokeRect(ann.x, ann.y, ann.width, ann.height);
+            });
 
-                ctx.restore();
+                        // Draw temporary shapes only if action has started
+                        if ((state.isDrawing || (state.isCropping && state.isCropStarted))) {
+                const current = getTransformedPoint(lastX, lastY);
+                ctx.strokeStyle = state.isCropping ? 'blue' : COLORS[state.currentClass];
+                
+                // Set fill style based on context
+                if (state.isCropping) {
+                    ctx.fillStyle = 'rgba(0, 0, 255, 0.1)'; // Light blue for crop
+                } else {
+                    ctx.fillStyle = hexToRGBA(COLORS[state.currentClass], 0.3); // Class color
+                }
+                
+                // Draw fill
+                ctx.fillRect(
+                    Math.min(startX, current.x),
+                    Math.min(startY, current.y),
+                    Math.abs(current.x - startX),
+                    Math.abs(current.y - startY)
+                );
+                
+                // Draw stroke
+                ctx.setLineDash([5 / state.scale]);
+                ctx.strokeRect(
+                    Math.min(startX, current.x),
+                    Math.min(startY, current.y),
+                    Math.abs(current.x - startX),
+                    Math.abs(current.y - startY)
+                );
+            }
             }
 
             // Coordinate Transformation
@@ -784,23 +816,24 @@ canvas {
             let lastX = 0, lastY = 0, startX = 0, startY = 0;
 
             function handleMouseDown(e) {
-                const rect = canvas.getBoundingClientRect();
-                lastX = e.clientX - rect.left;
-                lastY = e.clientY - rect.top;
-                
-                if (state.isZoomMode && e.button === 0) {
-                    state.panStart = { x: lastX, y: lastY };
-                } else if (state.isCropping) {
-                    const { x, y } = getTransformedPoint(lastX, lastY);
-                    startX = x;
-                    startY = y;
-                } else if (e.button === 0) {
-                    const { x, y } = getTransformedPoint(lastX, lastY);
-                    startX = x;
-                    startY = y;
-                    state.isDrawing = true;
-                }
+            const rect = canvas.getBoundingClientRect();
+            lastX = e.clientX - rect.left;
+            lastY = e.clientY - rect.top;
+            
+            if (state.isZoomMode && e.button === 0) {
+                state.panStart = { x: lastX, y: lastY };
+            } else if (state.isCropping) {
+                const { x, y } = getTransformedPoint(lastX, lastY);
+                startX = x;
+                startY = y;
+                state.isCropStarted = true; // Set flag when cropping starts
+            } else if (e.button === 0) {
+                const { x, y } = getTransformedPoint(lastX, lastY);
+                startX = x;
+                startY = y;
+                state.isDrawing = true;
             }
+        }
 
             function handleMouseMove(e) {
                 const rect = canvas.getBoundingClientRect();
@@ -818,32 +851,33 @@ canvas {
             }
 
             function handleMouseUp(e) {
-                if (state.panStart) {
-                    state.panStart = null;
-                    return;
-                }
-
-                const { x, y } = getTransformedPoint(lastX, lastY);
-                const [x1, y1, x2, y2] = sanitizeBox(startX, startY, x, y);
-                
-                if (state.isCropping) {
-                    cropImage(x1, y1, x2 - x1, y2 - y1);
-                    state.isCropping = false;
-                    document.getElementById('crop-btn').classList.remove('active');
-                } else if (state.isDrawing) {
-                    state.annotations.push({
-                        x: x1,
-                        y: y1,
-                        width: x2 - x1,  // Always positive
-                        height: y2 - y1, // Always positive
-                        class: state.currentClass
-                    });
-                    updateCellCounts();
-                    state.isDrawing = false;
-                }
-                
-                redraw();
+            if (state.panStart) {
+                state.panStart = null;
+                return;
             }
+
+            const { x, y } = getTransformedPoint(lastX, lastY);
+            const [x1, y1, x2, y2] = sanitizeBox(startX, startY, x, y);
+            
+            if (state.isCropping) {
+                cropImage(x1, y1, x2 - x1, y2 - y1);
+                state.isCropping = false;
+                state.isCropStarted = false; // Reset flag
+                document.getElementById('crop-btn').classList.remove('active');
+            } else if (state.isDrawing) {
+                state.annotations.push({
+                    x: x1,
+                    y: y1,
+                    width: x2 - x1,
+                    height: y2 - y1,
+                    class: state.currentClass
+                });
+                updateCellCounts();
+                state.isDrawing = false;
+            }
+            
+            redraw();
+        }
             function handleWheel(e) {
                 if (!state.isZoomMode) return;
                 
@@ -952,7 +986,7 @@ canvas {
         alert('Annotations saved locally!');
     }
 
-            function saveImage() {
+    function saveImage() {
     const tempCanvas = document.createElement('canvas');
     const tempCtx = tempCanvas.getContext('2d');
     
@@ -962,7 +996,7 @@ canvas {
 
     // Apply current brightness/contrast
     tempCtx.filter = `brightness(${100 + parseInt(brightness.value)}%) 
-                    contrast(${100 + parseInt(contrast.value)}%)`;
+                      contrast(${100 + parseInt(contrast.value)}%)`;
     
     // Draw base image with filters
     tempCtx.drawImage(state.image, 0, 0, state.naturalSize.width, state.naturalSize.height);
@@ -970,10 +1004,15 @@ canvas {
     // Reset filter for annotations
     tempCtx.filter = 'none';
     
-    // Draw annotations
+    // Draw annotations with dashed lines for detected ones
     state.annotations.forEach(ann => {
         tempCtx.strokeStyle = COLORS[ann.class];
         tempCtx.lineWidth = 2;
+        if (ann.isDetected) {
+            tempCtx.setLineDash([5, 5]);  // Dashed line for detected annotations
+        } else {
+            tempCtx.setLineDash([]);      // Solid line for manual annotations
+        }
         tempCtx.strokeRect(ann.x, ann.y, ann.width, ann.height);
     });
 
@@ -983,40 +1022,78 @@ canvas {
     link.download = `annotated_${state.imageName}.png`;
     link.click();
 }
+
+function hexToRGBA(hex, alpha) {
+    // Remove the '#' if present
+    hex = hex.replace('#', '');
+    // Parse the hex values
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+
             // Image Operations
-            function cropImage(x, y, width, height) {
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = width;
-                tempCanvas.height = height;
-                const tempCtx = tempCanvas.getContext('2d');
-                
-                tempCtx.drawImage(
-                    state.image,
-                    x, y, width, height,
-                    0, 0, width, height
-                );
+            async function cropImage(x, y, width, height) {
+    // Validate coordinates and dimensions
+    if (width <= 0 || height <= 0 || 
+        x < 0 || y < 0 || 
+        x + width > state.naturalSize.width || 
+        y + height > state.naturalSize.height) {
+        alert('Invalid crop area! Please select a valid region within the image.');
+        return;
+    }
 
-                state.image = tempCanvas;
-                state.naturalSize = { width, height };
-                state.annotations = state.annotations
-                    .filter(ann => 
-                        ann.x >= x && ann.x + ann.width <= x + width &&
-                        ann.y >= y && ann.y + ann.height <= y + height
-                    )
-                    .map(ann => ({
-                        x: ann.x - x,
-                        y: ann.y - y,
-                        width: ann.width,
-                        height: ann.height,
-                        class: ann.class
-                    }));
-                    updateCellCounts();
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = width;
+    tempCanvas.height = height;
+    const tempCtx = tempCanvas.getContext('2d');
 
-                canvas.width = width;
-                canvas.height = height;
-                resetView();
-                redraw();
-            }
+    try {
+        // Draw the cropped portion
+        tempCtx.drawImage(
+            state.image,
+            x, y, width, height,
+            0, 0, width, height
+        );
+
+        // Prepare form data for upload
+        const formData = new FormData();
+        const croppedBlob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/png'));
+        formData.append('file', croppedBlob, `${state.imageName}_cropped.tiff`);
+
+        // Upload to server and await response
+        const response = await axios.post('/upload-cropped', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        // Update state only if upload succeeds
+        state.image = tempCanvas;
+        state.naturalSize = { width, height };
+        state.annotations = state.annotations
+            .filter(ann => 
+                ann.x >= x && ann.x + ann.width <= x + width &&
+                ann.y >= y && ann.y + ann.height <= y + height
+            )
+            .map(ann => ({
+                ...ann,
+                x: ann.x - x,
+                y: ann.y - y
+            }));
+        state.imageName = response.data.base_name;
+        state.originalExtension = response.data.original_extension;
+
+        canvas.width = width;
+        canvas.height = height;
+        resetView();
+        updateCellCounts();
+        redraw();
+    } catch (error) {
+        console.error('Crop error:', error);
+        alert('Failed to crop image: ' + (error.response?.data?.error || error.message));
+    }
+}
 
             // UI Toggles
             function toggleCropping() {
@@ -1037,7 +1114,11 @@ canvas {
             <option value="SGN">SGN</option>
             <option value="MADM">MADM</option>
         </select>
-        <input type="number" id="epochs" class="btn" placeholder="Epochs" value="10" min="1" style="margin: 10px 0; width: 100%">
+        <div style="display: flex; align-items: center; gap: 10px; margin: 10px 0;">
+            <label for="epochs" style="white-space: nowrap;">Epochs:</label>
+            <input type="number" id="epochs" class="btn" 
+                   value="10" min="1" style="flex: 1;">
+        </div>
         <button class="btn" onclick="document.getElementById('train-csv').click()">Upload CSV</button>
         <input type="file" id="train-csv" hidden accept=".csv">
         
@@ -1110,9 +1191,11 @@ document.getElementById('fine-tune-btn').addEventListener('click', () => {
         <option value="MADM">MADM</option>
     </select>
     
-    <input type="number" id="saved-epochs" class="btn" 
-           placeholder="Epochs" value="20" min="1" 
-           style="margin: 10px 0; width: 100%">
+    <div style="display: flex; align-items: center; gap: 10px; margin: 10px 0;">
+        <label for="saved-epochs" style="white-space: nowrap;">Epochs:</label>
+        <input type="number" id="saved-epochs" class="btn" 
+               value="20" min="1" style="flex: 1;">
+    </div>
     
     <button class="btn" onclick="startSavedTraining()">Start Training</button>
     <button class="btn" onclick="document.getElementById('saved-train-modal').style.display = 'none'">
