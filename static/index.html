@@ -221,7 +221,7 @@ canvas {
                 imageName: 'image.tiff',
                 naturalSize: { width: 0, height: 0 }
             };
-
+            var overlap_factor = 0.3;
             // DOM Elements
             const canvas = document.getElementById('canvas');
             const ctx = canvas.getContext('2d');
@@ -368,7 +368,8 @@ canvas {
                         importedCount++;
                     });
                         // Merge overlapping boxes before updating state
-                        state.annotations = mergeOverlappingBoxes(state.annotations, 0.3, true);
+
+                        state.annotations = mergeOverlappingBoxes(state.annotations, overlap_factor, true);
                         importedCount = state.annotations.length;
 
                     updateCellCounts(importedCount);
@@ -525,7 +526,7 @@ canvas {
         });
 
         // Apply merging to MADM results
-        state.annotations = mergeOverlappingBoxes(rawAnnotations, 0.3, true);
+        state.annotations = mergeOverlappingBoxes(rawAnnotations, overlap_factor, true);
         const finalCount = state.annotations.length;
         updateCellCounts(finalCount);
         redraw();
@@ -628,7 +629,7 @@ canvas {
         });
 
         // Merge overlapping boxes before updating state
-        state.annotations = mergeOverlappingBoxes(rawAnnotations, 0.3, false);
+        state.annotations = mergeOverlappingBoxes(rawAnnotations, overlap_factor, false);
         const finalCount = state.annotations.length;
         updateCellCounts(finalCount);
         redraw();
@@ -1004,8 +1005,13 @@ async function handleImageUpload(e) {
     // Reset filter for annotations
     tempCtx.filter = 'none';
     
-    // Draw annotations with dashed lines for detected ones
+    // Draw annotations with both fill and stroke
     state.annotations.forEach(ann => {
+        // Draw semi-transparent fill
+        tempCtx.fillStyle = hexToRGBA(COLORS[ann.class], 0.3);
+        tempCtx.fillRect(ann.x, ann.y, ann.width, ann.height);
+
+        // Draw border with appropriate style
         tempCtx.strokeStyle = COLORS[ann.class];
         tempCtx.lineWidth = 2;
         if (ann.isDetected) {
@@ -1022,7 +1028,6 @@ async function handleImageUpload(e) {
     link.download = `annotated_${state.imageName}.png`;
     link.click();
 }
-
 function hexToRGBA(hex, alpha) {
     // Remove the '#' if present
     hex = hex.replace('#', '');
@@ -1035,60 +1040,58 @@ function hexToRGBA(hex, alpha) {
 
 
             // Image Operations
-            async function cropImage(x, y, width, height) {
-    // Validate coordinates and dimensions
-    if (width <= 0 || height <= 0 || 
-        x < 0 || y < 0 || 
-        x + width > state.naturalSize.width || 
-        y + height > state.naturalSize.height) {
-        alert('Invalid crop area! Please select a valid region within the image.');
+    async function cropImage(x, y, width, height) {
+    // Convert coordinates considering zoom/pan
+    const scaleFactor = 1 / state.scale;
+    const origX = Math.round((x - state.offsetX) * scaleFactor);
+    const origY = Math.round((y - state.offsetY) * scaleFactor);
+    const origWidth = Math.round(width * scaleFactor);
+    const origHeight = Math.round(height * scaleFactor);
+
+    // Validate coordinates
+    if (origWidth <= 0 || origHeight <= 0 || 
+        origX < 0 || origY < 0 || 
+        origX + origWidth > state.naturalSize.width || 
+        origY + origHeight > state.naturalSize.height) {
+        alert('Invalid crop area!');
         return;
     }
 
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext('2d');
-
     try {
-        // Draw the cropped portion
-        tempCtx.drawImage(
-            state.image,
-            x, y, width, height,
-            0, 0, width, height
-        );
-
-        // Prepare form data for upload
         const formData = new FormData();
-        const croppedBlob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/png'));
-        formData.append('file', croppedBlob, `${state.imageName}_cropped.tiff`);
+        formData.append('original_filename', `${state.imageName}.${state.originalExtension}`);
+        formData.append('x', origX);
+        formData.append('y', origY);
+        formData.append('width', origWidth);
+        formData.append('height', origHeight);
 
-        // Upload to server and await response
-        const response = await axios.post('/upload-cropped', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
-        });
+        const response = await axios.post('/upload-cropped', formData);
+        
+        // Update image display
+        const img = new Image();
+        img.onload = () => {
+            state.image = img;
+            state.naturalSize = { width: img.width, height: img.height };
+            canvas.width = img.width;
+            canvas.height = img.height;
+            
+            // Adjust annotations to new dimensions
+            state.annotations = state.annotations
+                .filter(ann => 
+                    ann.x >= origX && ann.x + ann.width <= origX + origWidth &&
+                    ann.y >= origY && ann.y + ann.height <= origY + origHeight
+                )
+                .map(ann => ({
+                    ...ann,
+                    x: ann.x - origX,
+                    y: ann.y - origY
+                }));
+            
+            resetView();
+            redraw();
+        };
+        img.src = response.data.converted_url;
 
-        // Update state only if upload succeeds
-        state.image = tempCanvas;
-        state.naturalSize = { width, height };
-        state.annotations = state.annotations
-            .filter(ann => 
-                ann.x >= x && ann.x + ann.width <= x + width &&
-                ann.y >= y && ann.y + ann.height <= y + height
-            )
-            .map(ann => ({
-                ...ann,
-                x: ann.x - x,
-                y: ann.y - y
-            }));
-        state.imageName = response.data.base_name;
-        state.originalExtension = response.data.original_extension;
-
-        canvas.width = width;
-        canvas.height = height;
-        resetView();
-        updateCellCounts();
-        redraw();
     } catch (error) {
         console.error('Crop error:', error);
         alert('Failed to crop image: ' + (error.response?.data?.error || error.message));
