@@ -109,51 +109,40 @@ def upload_file():
 
 @app.route('/upload-cropped', methods=['POST'])
 def upload_cropped_file():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-        
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-
     try:
-        # Clear previous uploads
-        clear_uploaded_images()
-        
-        original_name = secure_filename(file.filename)
-        base_name = os.path.splitext(original_name)[0]
-        original_extension = 'tiff'  # Force TIFF for detection compatibility
-        
-        # Save as TIFF in uploads folder
-        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{base_name}.tiff")
-        with Image.open(file) as img:
-            # Ensure 3 channels (RGB)
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-            img.save(upload_path, format='TIFF', compression='tiff_deflate')
-            print(f"Saved cropped image to {upload_path}")  # Debug log
+        # Get crop coordinates and original filename
+        original_name = request.form['original_filename']
+        x = int(float(request.form['x']))
+        y = int(float(request.form['y']))
+        width = int(float(request.form['width']))
+        height = int(float(request.form['height']))
 
-        # Verify file exists
-        if not os.path.exists(upload_path):
-            return jsonify({'error': 'Failed to save cropped image'}), 500
+        # Path to original TIFF
+        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], original_name)
+        
+        # Open and crop original image
+        with Image.open(upload_path) as img:
+            # Perform crop on original TIFF
+            cropped_img = img.crop((x, y, x + width, y + height))
+            
+            # Overwrite original file with cropped version
+            cropped_img.save(upload_path, format='TIFF', compression='tiff_deflate')
 
-        # Generate PNG for display
+        # Generate new PNG preview from updated TIFF
         unique_id = str(uuid.uuid4())
         output_filename = f"{unique_id}.png"
         output_path = os.path.join(app.config['CONVERTED_FOLDER'], output_filename)
-        with Image.open(upload_path) as img:
-            img.save(output_path, "PNG")
-            print(f"Generated PNG at {output_path}")  # Debug log
+        cropped_img.save(output_path, "PNG")
 
         return jsonify({
             'converted_url': f'/converted/{output_filename}',
-            'original_name': f"{base_name}.tiff",
-            'base_name': base_name,
-            'original_extension': original_extension
+            'original_name': original_name,  # Keep original filename
+            'base_name': os.path.splitext(original_name)[0],
+            'original_extension': 'tiff'
         })
-        
+
     except Exception as e:
-        print(f"Error in upload-cropped: {str(e)}")  # Debug log
+        print(f"Error in upload-cropped: {str(e)}")
         return jsonify({'error': f"Server error: {str(e)}"}), 500
     
 @app.route('/detect-sgn', methods=['POST'])
