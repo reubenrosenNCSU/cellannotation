@@ -175,15 +175,13 @@ def stitchDetection(detections, H, W, xsize=512, ysize=512, step=448):
 
 
 # %% Main code
-def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT = '/home/greenbaumgpu/Reuben/js_annotation/output'  # output dir for images
+def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT = '/home/greenbaumgpu/Reuben/js_annotation/output',  tHRESHOLD = 0.5
 ):
     
     testnames, testpaths = listFile(pATHTEST, '.tif')
 
     # Labels for detection
     labels_to_names = {0: 'SGN'}
-
-    tHRESHOLD = 0.5  # threshold for detection confidence score
     xsize = 512
     ysize = 512
     step = 448  # initial step size, can be adjusted dynamically based on image size
@@ -327,4 +325,5 @@ def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT 
 if __name__ == "__main__":
     pATHTEST = sys.argv[1]
     pATHRESULT = sys.argv[2]
-    main(pATHTEST, pATHRESULT)
+    tHRESHOLD = float(sys.argv[3])  # Ensure this line exists
+    main(pATHTEST, pATHRESULT, tHRESHOLD)
