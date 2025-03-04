@@ -160,6 +160,15 @@ canvas {
                        value="100" step="1" style="width: 60px;">
             </div>
         </div>
+        <div class="slider-container">
+            <label>Cell Diameter (px):</label>
+            <div style="display: flex; gap: 5px; margin: 5px 0;">
+                <input type="number" id="cell-diameter" class="threshold-input" 
+                       value="34" step="1" style="width: 100px;">
+                <button class="btn tooltip" data-tooltip="Scale image to optimize detection" 
+                        id="scale-btn">Scale</button>
+            </div>
+        </div>
 
         <button class="btn tooltip" data-tooltip="Save the Annotations before exporting" id="save-annotations-btn">Save Annotations</button>
         <button class="btn tooltip" data-tooltip="Export saved annotations (csv)" id="export-annotations-btn">Export Annotations</button>
@@ -305,6 +314,56 @@ canvas {
             
             redraw();
         }
+        document.getElementById('scale-btn').addEventListener('click', scaleImage);
+
+// Add scaling function
+async function scaleImage() {
+    const diameter = parseFloat(document.getElementById('cell-diameter').value);
+    if (isNaN(diameter) || diameter <= 0) {
+        alert('Please enter a valid cell diameter');
+        return;
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append('diameter', diameter);
+        formData.append('original_filename', `${state.imageName}.${state.originalExtension}`);
+
+        const response = await axios.post('/scale-image', formData);
+        
+        if (response.data.message) {
+            alert(response.data.message);
+            return;
+        }
+
+        // Update image
+        const img = new Image();
+        img.onload = () => {
+            const scalingFactor = response.data.scaling_factor;
+            
+            // Scale existing annotations
+            state.annotations.forEach(ann => {
+                ann.x *= scalingFactor;
+                ann.y *= scalingFactor;
+                ann.width *= scalingFactor;
+                ann.height *= scalingFactor;
+            });
+            
+            // Update dimensions
+            state.naturalSize.width = response.data.new_width;
+            state.naturalSize.height = response.data.new_height;
+            canvas.width = state.naturalSize.width;
+            canvas.height = state.naturalSize.height;
+            
+            state.image = img;
+            redraw();
+        };
+        img.src = response.data.converted_url;
+
+    } catch (error) {
+        alert('Scaling failed: ' + (error.response?.data?.error || error.message));
+    }
+}
 
         // CUSTOM DETECTION CODE
         document.getElementById('custom-detect-btn').addEventListener('click', () => {
