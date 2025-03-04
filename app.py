@@ -159,6 +159,7 @@ def detect_sgn():
         # Find the uploaded image
         upload_dir = app.config['UPLOAD_FOLDER']
         uploaded_files = [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]
+        output_csv_file = os.path.join(app.config['FINAL_OUTPUT_FOLDER'], 'annotations.csv')
         
         if not uploaded_files:
             return jsonify({'error': 'No image found. Upload an image first.'}), 400
@@ -168,11 +169,10 @@ def detect_sgn():
 
         # Run processing pipeline
         scripts = [
-            ['python3', 'scripts/normalize.py', filepath, final_output],
-            ['python3', 'scripts/splitimage.py', filepath, final_output],
-            ['python3', 'scripts/detection_SGN.py', filepath, final_output],
-            ['python3', 'scripts/mergeimage.py', filepath, final_output],
-            ['python3', 'scripts/mergecsv.py', filepath, final_output]
+            ['python3', 'scripts/8to16bit.py', app.config['UPLOAD_FOLDER'], app.config['INPUT_FOLDER']],
+            ['python3', 'scripts/splitimage.py', app.config['INPUT_FOLDER'], app.config['IMAGES_FOLDER']],
+            ['python3', 'scripts/detection_SGN.py', app.config['IMAGES_FOLDER'], app.config['OUTPUT_FOLDER']],
+            ['python3', 'scripts/mergecsv.py', app.config['OUTPUT_CSV_FOLDER'], output_csv_file]
         ]
 
         for script in scripts:
@@ -270,14 +270,15 @@ def detect_madm():
             
         filepath = os.path.join(upload_dir, uploaded_files[0])
         final_output = app.config['FINAL_OUTPUT_FOLDER']
+        output_csv_file = os.path.join(app.config['FINAL_OUTPUT_FOLDER'], 'annotations.csv')
+
 
         # Run processing pipeline with detection.py instead
         scripts = [
-            ['python3', 'scripts/normalize.py', filepath, final_output],
-            ['python3', 'scripts/splitimage.py', filepath, final_output],
-            ['python3', 'scripts/detection.py', filepath, final_output],  # Changed this line
-            ['python3', 'scripts/mergeimage.py', filepath, final_output],
-            ['python3', 'scripts/mergecsv.py', filepath, final_output]
+            ['python3', 'scripts/8to16bit.py', app.config['UPLOAD_FOLDER'], app.config['INPUT_FOLDER']],
+            ['python3', 'scripts/splitimage.py', app.config['INPUT_FOLDER'], app.config['IMAGES_FOLDER']],
+            ['python3', 'scripts/detection.py', app.config['IMAGES_FOLDER'], app.config['OUTPUT_FOLDER']],  # Changed this line
+            ['python3', 'scripts/mergecsv.py', app.config['OUTPUT_CSV_FOLDER'], output_csv_file]
         ]
 
         for script in scripts:
