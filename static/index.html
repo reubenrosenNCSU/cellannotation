@@ -169,6 +169,15 @@ canvas {
                         id="scale-btn">Scale</button>
             </div>
         </div>
+        <div class="slider-container">
+            <label>Detection Threshold:</label>
+            <div style="display: flex; gap: 5px; margin: 5px 0;">
+                <input type="number" id="detection-threshold" class="threshold-input" 
+                       value="0.5" step="0.1" min="0" max="1" style="width: 100px;">
+                <button class="btn tooltip" data-tooltip="Set confidence threshold for detection" 
+                        id="set-threshold-btn">Set</button>
+            </div>
+        </div>
 
         <button class="btn tooltip" data-tooltip="Save the Annotations before exporting" id="save-annotations-btn">Save Annotations</button>
         <button class="btn tooltip" data-tooltip="Export saved annotations (csv)" id="export-annotations-btn">Export Annotations</button>
@@ -654,8 +663,13 @@ async function scaleImage() {
             document.getElementById('detect-sgn-btn').addEventListener('click', detectSGN);
 
             async function detectSGN() {
+                const threshold = parseFloat(document.getElementById('detection-threshold').value);
+                if (isNaN(threshold) || threshold < 0 || threshold > 1) {
+                    alert('Please enter a valid threshold between 0 and 1!');
+                    return;
+                }
     try {
-        const response = await axios.post('/detect-sgn');
+        const response = await axios.post('/detect-sgn', { threshold });
         const csvData = response.data.annotations;
         
         // Parse and import the annotations
