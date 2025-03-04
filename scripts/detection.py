@@ -118,153 +118,159 @@ def stitchDetection(detections, H, W, xsize=512, ysize=512, step=448):
 
 
 # %% Main code
+def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT = '/home/greenbaumgpu/Reuben/js_annotation/output'  # output dir for images
+):
 
-pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images'  # change this to the path that your image is in.
-testnames, testpaths = listFile(pATHTEST, '.tif')
+    testnames, testpaths = listFile(pATHTEST, '.tif')
 
-# Labels for detection
-labels_to_names = {0: 'uncertain', 1: 'yellow neuron', 2: 'yellow astrocyte', 
-                    3: 'green neuron', 4: 'green astrocyte', 5: 'red neuron', 
-                    6: 'red astrocyte'}
+    # Labels for detection
+    labels_to_names = {0: 'uncertain', 1: 'yellow neuron', 2: 'yellow astrocyte', 
+                        3: 'green neuron', 4: 'green astrocyte', 5: 'red neuron', 
+                        6: 'red astrocyte'}
 
-tHRESHOLD = 0.5  # threshold for detection confidence score
-xsize = 512
-ysize = 512
-step = 448  # initial step size, can be adjusted dynamically based on image size
+    tHRESHOLD = 0.5  # threshold for detection confidence score
+    xsize = 512
+    ysize = 512
+    step = 448  # initial step size, can be adjusted dynamically based on image size
 
-classes = list(labels_to_names.values())
-num_class = len(classes)
-pATHRESULT = '/home/greenbaumgpu/Reuben/js_annotation/output'  # output dir for images
-pATHCSV = '/home/greenbaumgpu/Reuben/js_annotation/output/output_csv'  # output dir for CSV files
+    classes = list(labels_to_names.values())
+    num_class = len(classes)
+    pATHCSV = 'output/output_csv'  # output dir for CSV files
 
-model_path = os.path.join('/home/greenbaumgpu/Reuben/js_annotation/snapshots', 'trainedmodel.h5')
+    model_path = os.path.join('snapshots', 'trainedmodel.h5')
 
-# load retinanet model
-model = models.load_model(model_path, backbone_name='resnet50')
-model = models.convert_model(model)  # Convert to inference model
+    # load retinanet model
+    model = models.load_model(model_path, backbone_name='resnet50')
+    model = models.convert_model(model)  # Convert to inference model
 
-#define variables
-all_detections = [[None for i in range(num_class)] for j in range(len(testnames))]
-clean_detections = [[None for i in range(num_class)] for j in range(len(testnames))]
+    #define variables
+    all_detections = [[None for i in range(num_class)] for j in range(len(testnames))]
+    clean_detections = [[None for i in range(num_class)] for j in range(len(testnames))]
 
 
-# %% Processing images and detecting
+    # %% Processing images and detecting
 
-for i, testpath in enumerate(testpaths):
-        # Initialize variables
-        CSV = os.path.join(pATHCSV, testnames[i] + '_result.csv')
-        with open(CSV, 'w', newline='') as csvfile:
-            filewriter = csv.writer(csvfile, delimiter=',', quotechar='|', 
-                                    quoting=csv.QUOTE_MINIMAL)
-            
-            
-            # Read and prepare image
-            fullimg_c1 = read_image_bgr(testpath)
-            fullimg = np.zeros(fullimg_c1.shape, dtype=np.uint16)
-            fullimg[:, :, 2] = fullimg_c1[:, :, 2].copy()  # BGR
-            fullimg[:, :, 1] = fullimg_c1[:, :, 1]
+    for i, testpath in enumerate(testpaths):
+            # Initialize variables
+            CSV = os.path.join(pATHCSV, testnames[i] + '_result.csv')
+            with open(CSV, 'w', newline='') as csvfile:
+                filewriter = csv.writer(csvfile, delimiter=',', quotechar='|', 
+                                        quoting=csv.QUOTE_MINIMAL)
+                
+                
+                # Read and prepare image
+                fullimg_c1 = read_image_bgr(testpath)
+                fullimg = np.zeros(fullimg_c1.shape, dtype=np.uint16)
+                fullimg[:, :, 2] = fullimg_c1[:, :, 2].copy()  # BGR
+                fullimg[:, :, 1] = fullimg_c1[:, :, 1]
 
-            if (fullimg[:, :, 2].sum() > 0) or (fullimg[:, :, 1].sum() > 0):
-                fulldraw = fullimg.copy() / 257  # RGB to save
-                fulldraw = (fulldraw * 3).clip(0, 255)  # Increase brightness
+                if (fullimg[:, :, 2].sum() > 0) or (fullimg[:, :, 1].sum() > 0):
+                    fulldraw = fullimg.copy() / 257  # RGB to save
+                    fulldraw = (fulldraw * 3).clip(0, 255)  # Increase brightness
 
-                # Padding for uneven dimensions
-                H0, W0, _ = fullimg.shape
-                step_x = min(xsize, W0)  # Ensure step_x does not exceed the width
-                step_y = min(ysize, H0)  # Ensure step_y does not exceed the height
+                    # Padding for uneven dimensions
+                    H0, W0, _ = fullimg.shape
+                    step_x = min(xsize, W0)  # Ensure step_x does not exceed the width
+                    step_y = min(ysize, H0)  # Ensure step_y does not exceed the height
 
-                # Adjust step size if image is smaller than tile size
-                if W0 < xsize:
-                    step_x = W0
-                if H0 < ysize:
-                    step_y = H0
+                    # Adjust step size if image is smaller than tile size
+                    if W0 < xsize:
+                        step_x = W0
+                    if H0 < ysize:
+                        step_y = H0
 
-                if not (H0 - ysize) % step_y == 0:
-                    H = H0 - H0 % step_y + ysize
+                    if not (H0 - ysize) % step_y == 0:
+                        H = H0 - H0 % step_y + ysize
+                    else:
+                        H = H0
+                    if not (W0 - xsize) % step_x == 0:
+                        W = W0 - W0 % step_x + xsize
+                    else:
+                        W = W0
+
+                    if W != W0 or H != H0:
+                        fullimg_pad = np.zeros((H, W, 3), dtype=np.uint16)
+                        fullimg_pad[0:H0, 0:W0] = fullimg.copy()
+                    else:
+                        fullimg_pad = fullimg.copy()
+
+                    n = 0
+                    raw_detections = np.empty((0, 6))
+
+                    # Process patches
+                    for x in range(0, W, step_x):
+                        for y in range(0, H, step_y):
+                            offset = np.array([x, y, x, y])
+
+                            # Load image patch
+                            image = fullimg_pad[y:y + step_y, x:x + step_x]
+
+                            # Preprocess the image
+                            image = preprocess_image(image)
+                            image, scale = resize_image(image)
+
+                            # Process the image through the model
+                            boxes, scores, labels = model.predict_on_batch(np.expand_dims(image, axis=0))
+
+                            # Adjust bounding boxes based on the image scale and offset
+                            boxes /= scale
+                            boxes += offset
+                            boxes[:, :, 2] = np.clip(boxes[:, :, 2], 0, W0)
+                            boxes[:, :, 3] = np.clip(boxes[:, :, 3], 0, H0)
+
+                            # Filter out detections below the threshold
+                            indices = np.where(scores[0, :] > tHRESHOLD)[0]
+
+                            # Sort the scores
+                            scores = scores[0][indices]
+                            scores_sort = np.argsort(-scores)
+
+                            # Save the detections
+                            image_boxes = boxes[0, indices[scores_sort], :]
+                            image_scores = scores[scores_sort]
+                            image_labels = labels[0, indices[scores_sort]]
+                            image_detections = np.concatenate(
+                                [image_boxes, np.expand_dims(image_scores, axis=1), np.expand_dims(image_labels, axis=1)], axis=1
+                            )
+                            raw_detections = np.append(raw_detections, image_detections, axis=0)
                 else:
-                    H = H0
-                if not (W0 - xsize) % step_x == 0:
-                    W = W0 - W0 % step_x + xsize
-                else:
-                    W = W0
+                    raw_detections = np.empty((0, 6))
+                
+                for label in range(num_class):
 
-                if W != W0 or H != H0:
-                    fullimg_pad = np.zeros((H, W, 3), dtype=np.uint16)
-                    fullimg_pad[0:H0, 0:W0] = fullimg.copy()
-                else:
-                    fullimg_pad = fullimg.copy()
+                    all_detections[i][label] = raw_detections[raw_detections[:, -1] == label, :-1]
+                    detections = raw_detections[raw_detections[:, -1] == label, :-1].copy()
+                    if detections.size > 1:
+                        cleaned_detections = stitchDetection(detections, H0, W0, xsize, ysize, step=step_x)
+                    else:
+                        cleaned_detections = detections.copy()
+                    cleaned_detections = np.concatenate([cleaned_detections,
+                                                                np.zeros([cleaned_detections.shape[0],1]),
+                                                                np.ones([cleaned_detections.shape[0],1])*(i+1)],
+                                                                axis=1)
+                    clean_detections[i][label] = cleaned_detections
 
-                n = 0
-                raw_detections = np.empty((0, 6))
+                    # visualize detections and output
+                    if cleaned_detections.size > 1:
+                        for j, detection in enumerate(list(cleaned_detections)):
+                            b = list(map(int, detection[:4]))
+                            color = label_color(label)
+                            draw_box(fulldraw, b, color=color, thickness=2)
+                            cleaned_detections[j,5] = fullimg[b[1]:b[3],b[0]:b[2]].mean()
 
-                # Process patches
-                for x in range(0, W, step_x):
-                    for y in range(0, H, step_y):
-                        offset = np.array([x, y, x, y])
+                            #writing the csv file
+                            filewriter.writerow([testnames[i],
+                                                                detection[0],detection[1],
+                                                                detection[2],detection[3],
+                                                                classes[label],detection[-3],
+                                                                detection[-2],detection[-1]])
+                            
+                            #save the image
+                output_image_path = os.path.join(pATHRESULT, testnames[i] + '_detected.png')
+                cv2.imwrite(output_image_path, fulldraw)
 
-                        # Load image patch
-                        image = fullimg_pad[y:y + step_y, x:x + step_x]
 
-                        # Preprocess the image
-                        image = preprocess_image(image)
-                        image, scale = resize_image(image)
-
-                        # Process the image through the model
-                        boxes, scores, labels = model.predict_on_batch(np.expand_dims(image, axis=0))
-
-                        # Adjust bounding boxes based on the image scale and offset
-                        boxes /= scale
-                        boxes += offset
-                        boxes[:, :, 2] = np.clip(boxes[:, :, 2], 0, W0)
-                        boxes[:, :, 3] = np.clip(boxes[:, :, 3], 0, H0)
-
-                        # Filter out detections below the threshold
-                        indices = np.where(scores[0, :] > tHRESHOLD)[0]
-
-                        # Sort the scores
-                        scores = scores[0][indices]
-                        scores_sort = np.argsort(-scores)
-
-                        # Save the detections
-                        image_boxes = boxes[0, indices[scores_sort], :]
-                        image_scores = scores[scores_sort]
-                        image_labels = labels[0, indices[scores_sort]]
-                        image_detections = np.concatenate(
-                            [image_boxes, np.expand_dims(image_scores, axis=1), np.expand_dims(image_labels, axis=1)], axis=1
-                        )
-                        raw_detections = np.append(raw_detections, image_detections, axis=0)
-            else:
-                raw_detections = np.empty((0, 6))
-            
-            for label in range(num_class):
-
-                all_detections[i][label] = raw_detections[raw_detections[:, -1] == label, :-1]
-                detections = raw_detections[raw_detections[:, -1] == label, :-1].copy()
-                if detections.size > 1:
-                    cleaned_detections = stitchDetection(detections, H0, W0, xsize, ysize, step=step_x)
-                else:
-                    cleaned_detections = detections.copy()
-                cleaned_detections = np.concatenate([cleaned_detections,
-                                                            np.zeros([cleaned_detections.shape[0],1]),
-                                                            np.ones([cleaned_detections.shape[0],1])*(i+1)],
-                                                            axis=1)
-                clean_detections[i][label] = cleaned_detections
-
-                # visualize detections and output
-                if cleaned_detections.size > 1:
-                    for j, detection in enumerate(list(cleaned_detections)):
-                        b = list(map(int, detection[:4]))
-                        color = label_color(label)
-                        draw_box(fulldraw, b, color=color, thickness=2)
-                        cleaned_detections[j,5] = fullimg[b[1]:b[3],b[0]:b[2]].mean()
-
-                        #writing the csv file
-                        filewriter.writerow([testnames[i],
-                                                            detection[0],detection[1],
-                                                            detection[2],detection[3],
-                                                            classes[label],detection[-3],
-                                                            detection[-2],detection[-1]])
-                        
-                        #save the image
-            output_image_path = os.path.join(pATHRESULT, testnames[i] + '_detected.png')
-            cv2.imwrite(output_image_path, fulldraw)
+if __name__ == "__main__":
+    pATHTEST = sys.argv[1]
+    pATHRESULT = sys.argv[2]
+    main(pATHTEST, pATHRESULT)

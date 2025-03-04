@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import tifffile as tiff
+import sys
 
 def split_tiff(input_dir, output_dir, tile_size=(512, 512)):
     # Ensure the output directory exists
@@ -44,7 +45,14 @@ def split_tiff(input_dir, output_dir, tile_size=(512, 512)):
     return all_split_images
 
 # Example usage
-input_dir = '/home/greenbaumgpu/Reuben/js_annotation/input'
-output_dir = '/home/greenbaumgpu/Reuben/js_annotation/images'
+#input_dir = '/home/greenbaumgpu/Reuben/js_annotation/input'
+#output_dir = '/home/greenbaumgpu/Reuben/js_annotation/images'
+
+
+if __name__== "__main__":
+
+    input_dir= sys.argv[1]
+    output_dir = sys.argv[2]
+
 split_images = split_tiff(input_dir, output_dir)
 print(f"Created {len(split_images)} tiles.")

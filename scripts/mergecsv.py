@@ -1,5 +1,6 @@
 import os
 import csv
+import sys
 
 def adjust_bounding_boxes(input_csv_dir, output_csv_file, tile_size=(512, 512)):
     # Ensure the output CSV directory exists
@@ -59,8 +60,11 @@ def adjust_bounding_boxes(input_csv_dir, output_csv_file, tile_size=(512, 512)):
     return image_width, image_height
 
 # Example usage
-input_csv_dir = '/home/greenbaumgpu/Reuben/js_annotation/output/output_csv'  # Path to the folder containing your CSV files
-output_csv_file = '/home/greenbaumgpu/Reuben/js_annotation/finaloutput/annotations.csv'  # Path for the output merged CSV file
-tile_size = (512, 512)  # The size of each tile (you can adjust this)
-image_width, image_height = adjust_bounding_boxes(input_csv_dir, output_csv_file, tile_size)
-print(f"Adjusted annotations saved to {output_csv_file}")
+#input_csv_dir = '/home/greenbaumgpu/Reuben/js_annotation/output/output_csv'  # Path to the folder containing your CSV files
+#output_csv_file = '/home/greenbaumgpu/Reuben/js_annotation/finaloutput/annotations.csv'  # Path for the output merged CSV file
+
+if __name__=="__main__":
+    input_csv_dir=sys.argv[1]
+    output_csv_file=sys.argv[2]
+    image_width, image_height = adjust_bounding_boxes(input_csv_dir, output_csv_file)
+    (f"Adjusted annotations saved to {output_csv_file}")
