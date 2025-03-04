@@ -31,6 +31,8 @@ os.makedirs(app.config['INPUT_FOLDER'], exist_ok=True) #input
 os.makedirs(app.config['NORMALIZE_FOLDER'], exist_ok=True) #normalize folder
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True) #output folder
 os.makedirs(app.config['OUTPUT_CSV_FOLDER'], exist_ok=True) #output_csv folder located within output.
+app.config['ORIGINAL_UPLOAD_FOLDER'] = 'original_uploads'
+os.makedirs(app.config['ORIGINAL_UPLOAD_FOLDER'], exist_ok=True)
 
 
 
@@ -87,9 +89,15 @@ def upload_file():
         base_name = os.path.splitext(original_name)[0]
         original_extension = os.path.splitext(original_name)[1][1:].lower()
 
+        # Save original to preservation folder first
+        original_preserve_path = os.path.join(app.config['ORIGINAL_UPLOAD_FOLDER'], original_name)
+        file.save(original_preserve_path)
+        
+        # Then create a copy for working uploads
         upload_path = os.path.join(app.config['UPLOAD_FOLDER'], original_name)
-        file.save(upload_path)
+        shutil.copy(original_preserve_path, upload_path)  # Changed from file.save()
 
+        # Generate preview
         unique_id = str(uuid.uuid4())
         output_filename = f"{unique_id}.png"
         output_path = os.path.join(app.config['CONVERTED_FOLDER'], output_filename)
@@ -587,7 +595,48 @@ def detect_custom():
         except:
             pass
 
+@app.route('/scale-image', methods=['POST'])
+def scale_image():
+    try:
+        diameter = float(request.form['diameter'])
+        original_filename = request.form['original_filename']
+        
+        # Check if scaling needed
+        if abs(diameter - 34) / 34 <= 0.25:
+            return jsonify({'message': 'No scaling required'}), 200
+            
+        scaling_factor = 34.0 / diameter
 
+        # Get original image path
+        original_path = os.path.join(app.config['ORIGINAL_UPLOAD_FOLDER'], original_filename)
+        if not os.path.exists(original_path):
+            return jsonify({'error': 'Original image not found'}), 400
+
+        # Resize and save
+        with Image.open(original_path) as img:
+            new_width = int(img.width * scaling_factor)
+            new_height = int(img.height * scaling_factor)
+            resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Save scaled version to uploads
+            upload_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+            resized_img.save(upload_path, format='TIFF', compression='tiff_deflate')
+            
+            # Generate new preview
+            unique_id = str(uuid.uuid4())
+            output_filename = f"{unique_id}.png"
+            output_path = os.path.join(app.config['CONVERTED_FOLDER'], output_filename)
+            resized_img.save(output_path, "PNG")
+
+            return jsonify({
+                'converted_url': f'/converted/{output_filename}',
+                'scaling_factor': scaling_factor,
+                'new_width': new_width,
+                'new_height': new_height
+            })
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 
