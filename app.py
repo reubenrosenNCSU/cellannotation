@@ -158,6 +158,7 @@ def detect_sgn():
     try:
         # Find the uploaded image
         upload_dir = app.config['UPLOAD_FOLDER']
+        threshold = request.json.get('threshold', 0.5)  # Default to 0.5 if not provided
         uploaded_files = [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]
         output_csv_file = os.path.join(app.config['FINAL_OUTPUT_FOLDER'], 'annotations.csv')
         
@@ -171,7 +172,7 @@ def detect_sgn():
         scripts = [
             ['python3', 'scripts/8to16bit.py', app.config['UPLOAD_FOLDER'], app.config['INPUT_FOLDER']],
             ['python3', 'scripts/splitimage.py', app.config['INPUT_FOLDER'], app.config['IMAGES_FOLDER']],
-            ['python3', 'scripts/detection_SGN.py', app.config['IMAGES_FOLDER'], app.config['OUTPUT_FOLDER']],
+            ['python3', 'scripts/detection_SGN.py', app.config['IMAGES_FOLDER'], app.config['OUTPUT_FOLDER'], str(threshold)],
             ['python3', 'scripts/mergecsv.py', app.config['OUTPUT_CSV_FOLDER'], output_csv_file]
         ]
 
