@@ -5,7 +5,7 @@ The primary objective is to enable biologists with little to no programming expe
 
 The tool uses keras-retinanet for detection.
 
-![Screenshot](https://i.ibb.co/xSYWfQY5/image.png)
+![Screenshot](screenshots/image.png)
 
 ## Features
 
@@ -93,7 +93,7 @@ Essentially, your directory should roughly look like this:
 
 
 
-![Screenshot](https://i.ibb.co/3yMfS0yF/image.png)
+![Screenshot](https://camo.githubusercontent.com/804f51b9960a47677c5fbb0f0a504e35b0f85b6118ac9c7ef096837383f689f4/68747470733a2f2f692e6962622e636f2f33794d66533079462f696d6167652e706e67)
 
 
 ## Acknowledgements
