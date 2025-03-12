@@ -10,6 +10,8 @@ import h5py
 import time
 from PIL import Image, ImageOps
 import numpy as np
+import zipfile
+import io
 
 
 app = Flask(__name__)
@@ -89,20 +91,37 @@ def upload_file():
         base_name = os.path.splitext(original_name)[0]
         original_extension = os.path.splitext(original_name)[1][1:].lower()
 
-        # Save original to preservation folder first
-        original_preserve_path = os.path.join(app.config['ORIGINAL_UPLOAD_FOLDER'], original_name)
-        file.save(original_preserve_path)
-        
-        # Then create a copy for working uploads
-        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], original_name)
-        shutil.copy(original_preserve_path, upload_path)  # Changed from file.save()
+        # Read image and ensure RGB (3 channels)
+        with Image.open(file.stream) as img:
+            # Convert RGBA/LA to RGB if needed
+            if img.mode in ('RGBA', 'LA'):
+                img = img.convert('RGB')
+            
+            # Save original to preservation folder
+            original_preserve_path = os.path.join(app.config['ORIGINAL_UPLOAD_FOLDER'], original_name)
+            img.save(original_preserve_path, format='TIFF', compression='tiff_deflate')
+            
+            # Save processed RGB copy to working uploads
+            upload_path = os.path.join(app.config['UPLOAD_FOLDER'], original_name)
+            img.save(upload_path, format='TIFF', compression='tiff_deflate')
 
-        # Generate preview
+        # Generate preview (must be inside the try block)
         unique_id = str(uuid.uuid4())
         output_filename = f"{unique_id}.png"
         output_path = os.path.join(app.config['CONVERTED_FOLDER'], output_filename)
         
         with Image.open(upload_path) as img:
+            # Normalize 16-bit data for PNG preview
+            if img.mode == 'I;16':
+                # Convert to numpy array and normalize
+                img_array = np.array(img).astype(np.uint16)
+                min_val = np.min(img_array)
+                max_val = np.max(img_array)
+                if max_val > min_val:  # Avoid division by zero
+                    normalized = ((img_array - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+                else:
+                    normalized = (img_array // 256).astype(np.uint8)  # Fallback scaling
+                img = Image.fromarray(normalized)
             img.save(output_path, "PNG")
 
         return jsonify({
@@ -112,6 +131,40 @@ def upload_file():
             'original_extension': original_extension
         })
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    
+@app.route('/export-annotations', methods=['POST'])
+def export_annotations():
+    try:
+        # Get both CSV data and current image name from request
+        data = request.json
+        csv_data = data['csv_data']
+        original_filename = data['original_filename']
+
+        # Get current TIFF path
+        tiff_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+        if not os.path.exists(tiff_path):
+            return jsonify({'error': 'Current TIFF file not found'}), 404
+
+        # Create in-memory ZIP file
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # Add CSV
+            zipf.writestr('annotations.csv', csv_data)
+            # Add TIFF
+            zipf.write(tiff_path, os.path.basename(tiff_path))
+
+        zip_buffer.seek(0)
+
+        return send_file(
+            zip_buffer,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f'{os.path.splitext(original_filename)[0]}_export.zip'
+        )
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -158,7 +211,7 @@ def detect_sgn():
     try:
         # Find the uploaded image
         upload_dir = app.config['UPLOAD_FOLDER']
-        threshold = request.json.get('threshold', 0.5)  # Default to 0.5 if not provided
+        threshold = request.json.get('threshold', 0.5)
         uploaded_files = [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]
         output_csv_file = os.path.join(app.config['FINAL_OUTPUT_FOLDER'], 'annotations.csv')
         
@@ -177,11 +230,29 @@ def detect_sgn():
         ]
 
         for script in scripts:
-            result = subprocess.run(script, capture_output=True, text=True)
-            if result.returncode != 0:
+            print(f"\n🚀 Running: {' '.join(script)}")
+            process = subprocess.Popen(
+                script,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+
+            # Print output in real-time and capture it
+            output = []
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+                if line:
+                    print(line.strip())  # Show in terminal
+                    output.append(line)
+
+            if process.returncode != 0:
                 return jsonify({
                     'error': f'Script {script[1]} failed',
-                    'message': result.stderr
+                    'message': ''.join(output)
                 }), 500
 
         # Cleanup directories
@@ -273,21 +344,38 @@ def detect_madm():
         final_output = app.config['FINAL_OUTPUT_FOLDER']
         output_csv_file = os.path.join(app.config['FINAL_OUTPUT_FOLDER'], 'annotations.csv')
 
-
-        # Run processing pipeline with detection.py instead
+        # Run processing pipeline with detection.py
         scripts = [
             ['python3', 'scripts/8to16bit.py', app.config['UPLOAD_FOLDER'], app.config['INPUT_FOLDER']],
             ['python3', 'scripts/splitimage.py', app.config['INPUT_FOLDER'], app.config['IMAGES_FOLDER']],
-            ['python3', 'scripts/detection.py', app.config['IMAGES_FOLDER'], app.config['OUTPUT_FOLDER']],  # Changed this line
+            ['python3', 'scripts/detection.py', app.config['IMAGES_FOLDER'], app.config['OUTPUT_FOLDER']],
             ['python3', 'scripts/mergecsv.py', app.config['OUTPUT_CSV_FOLDER'], output_csv_file]
         ]
 
         for script in scripts:
-            result = subprocess.run(script, capture_output=True, text=True)
-            if result.returncode != 0:
+            print(f"\n🚀 Running: {' '.join(script)}")
+            process = subprocess.Popen(
+                script,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1  # Line buffered
+            )
+
+            # Print output in real-time and capture it
+            output = []
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+                if line:
+                    print(line.strip())  # Show in terminal
+                    output.append(line)
+
+            if process.returncode != 0:
                 return jsonify({
                     'error': f'Script {script[1]} failed',
-                    'message': result.stderr
+                    'message': ''.join(output)
                 }), 500
 
         # Cleanup directories
@@ -382,11 +470,11 @@ def train_saved_data():
 
         # 6. Build training command
         cmd = [
-            'python3', 'keras_retinanet/bin/train.py',
+            'python3', 'keras_retinanet/keras_retinanet/bin/train.py',
             '--weights', weights_path,
             '--freeze-backbone',
-            '--lr', '1e-6',
-            '--batch-size', '1',
+            '--lr', '1e-4',
+            '--batch-size', '8',
             '--epochs', str(epochs),
             '--snapshot-path', 'snapshots/',
             'csv', '/home/greenbaumgpu/Reuben/js_annotation/saved_data/merged_annotations.csv',
@@ -472,11 +560,10 @@ def train_model():
 
         # Run training
         cmd = [
-            'python3', 'keras_retinanet/bin/train.py',
+            'python3', 'keras_retinanet/keras_retinanet/bin/train.py',
             '--weights', weights_file,
-            '--freeze-backbone',
-            '--lr', '1e-5',
-            '--batch-size', '1',
+            '--lr', '1e-4',
+            '--batch-size', '8',
             '--epochs', str(epochs),
             '--snapshot-path', 'snapshots/',
             'csv', 
@@ -609,18 +696,18 @@ def scale_image():
             
         scaling_factor = 34.0 / diameter
 
-        # Get original image path
-        original_path = os.path.join(app.config['ORIGINAL_UPLOAD_FOLDER'], original_filename)
-        if not os.path.exists(original_path):
-            return jsonify({'error': 'Original image not found'}), 400
+        # Get CURRENT image path (from UPLOAD_FOLDER, not original)
+        current_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+        if not os.path.exists(current_path):
+            return jsonify({'error': 'Current image not found'}), 400
 
         # Resize and save
-        with Image.open(original_path) as img:
+        with Image.open(current_path) as img:
             new_width = int(img.width * scaling_factor)
             new_height = int(img.height * scaling_factor)
             resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
             
-            # Save scaled version to uploads
+            # Save scaled version to uploads (overwrite current)
             upload_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
             resized_img.save(upload_path, format='TIFF', compression='tiff_deflate')
             
@@ -639,7 +726,6 @@ def scale_image():
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
 
 
 if __name__ == '__main__':
