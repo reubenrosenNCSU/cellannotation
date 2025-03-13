@@ -16,6 +16,7 @@ The tool uses keras-retinanet for detection.
 - You can add new annotations or remove the detected annotations after detection is completed
 - You can fine tune the model, either by uploading your own images and  corresponding annotations, or by using the images you have previously used on this tool.
 - Crop, zoom, brightness and contrast changes to adjust view of image. Can also change the threshold limit of brightness and contrast.
+- Fine tune and retrain the model for better results.
 
 ## Installation (Linux Tested)
 
