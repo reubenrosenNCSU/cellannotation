@@ -1,147 +1,125 @@
-
 # Automatic Cell Annotation Tool
 
-[YouTube Demonstration](https://youtu.be/IhLrQrVeXEQ)
+[![YouTube Demonstration](https://img.shields.io/badge/YouTube-Demonstration-red)](https://youtu.be/IhLrQrVeXEQ)
 
-The primary objective is to enable biologists with little to no programming experience to deploy and use ML models for object detection purposes. A cell detection tool (mainly SGN and MADM) which allows a user to use object detection models to detect cells in a microscope image.
-
-The tool uses keras-retinanet for detection.
+A machine learning-based tool for automated detection and annotation of **Spiral Ganglion Neurons (SGN)** and **Mosaic Analysis with Double Markers (MADM)** cells in microscope images. Built on the `keras-retinanet` framework, this tool enables biologists to deploy and refine object detection models without requiring programming expertise.
 
 ![Screenshot](screenshots/image.png)
 
 ## Features
 
-- Automatically detects SGN and MADM cells
-- Real time detection of cell count
-- You can add new annotations or remove the detected annotations after detection is completed
-- You can fine tune the model, either by uploading your own images and  corresponding annotations, or by using the images you have previously used on this tool.
-- Crop, zoom, brightness and contrast changes to adjust view of image. Can also change the threshold limit of brightness and contrast.
-- Fine tune and retrain the model for better results.
+- **Automated Detection**: Pre-trained models for SGN and MADM cell detection.
+- **Real-Time Analysis**: Dynamic cell counting during image processing.
+- **Annotation Editing**: Add, modify, or remove annotations post-detection.
+- **Model Customization**: 
+  - Fine-tune models using custom datasets or prior annotations.
+  - Retrain models for improved accuracy.
+- **Image Preprocessing**: Adjust brightness, contrast, and zoom; set brightness/contrast thresholds.
+- **Cross-Platform Accessibility**: Hosted on a static IP for network-wide access.
 
-## Installation (Linux Tested)
+---
+
+## Installation
+
+### Prerequisites
+- **Anaconda**: Install from [Anaconda Documentation](https://docs.anaconda.com/anaconda/install/index.html).
+- **Linux Environment**: Tested on Ubuntu 20.04 LTS.
+
+### Steps
+
+1. **Clone and Configure Repositories**:
+   ```bash
+   git clone https://github.com/fizyr/keras-retinanet.git
+   mv keras-retinanet keras_retinanet
+   ```
+**Replace Core Files**:
+
+Overwrite the following files in keras_retinanet/utils/ with those provided in this repository:
+
+```
+image.py
+```
+```
+colors.py
+```
+```
+gpu.py
+```
+**Modify training script**:
+
+In keras_retinanet/keras_retinanet/bin/train.py, set steps = None (default: 10000).
+
+Set Up Conda Environment:
 
 
-1) Download the original keras-retinanet from [fizyr/keras-retinanet](https://github.com/fizyr/keras-retinanet). Place it in the app directory. (Make sure that you are using the local keras_retinanet folder and not the module,(make sure keras-retinanet is in editable mode) or else replacing the files will not impact the output. I renamed my keras-retinanet local repository to keras_retinanet, and created a symbolic link to the local folder, so that instead of using the module installed in the conda/python environment, it locates and uses the local files.  
-Replace `./keras_retinanet/utils/image.py`, `./keras_retinanet/utils/colors.py`, and `./keras_retinanet/utils/gpu.py` with the py files provided in the repo.
-
-Ensure that in keras_retinanet/keras_retinanet/bin/train.py, the steps parameter is set to 'None'. The default value in the original script is set to 10000
-
-
-
-Check [here](https://docs.anaconda.com/anaconda/install/index.html) for Anaconda documentation.  
-Open Anaconda Prompt and create a virtual environment. I have already provided a conda environment environment.yml file which you can use to help get started.
-
-```bash
+```
 conda env create -f environment.yml
-```
-
-then run
-
-```bash
-conda activate environment.yml
-```
-
-to be extra sure about having the required packages, run the following in the environment:
-
-```bash
+conda activate environment
 pip install -r requirements.txt
 ```
+**Install keras-retinanet in Editable Mode:**
 
 
-Go to the code directory, e.g. `.../keras-retinanet-main/`, in Anaconda Prompt.  
-Install keras-retinanet `pip install . --user`.  
-To run the code directly from the directory, run `python setup.py build_ext --inplace` to compile Cython code.
-
-**How I made sure the module is editable:**
-
-In my case it was referencing cached files, and using the installed module instead of the repo which has to be installed inside this repository. So I had to do a clean reinstall of the module in editable mode. Hence, once you clone this repository, open it and run this command in it
-
-```bash
-git clone https://github.com/fizyr/keras-retinanet.git
 ```
-
-this installs the keras-retinanet module into this project. For my code the folder was renamed to keras_retinanet, so run this command
-
-```bash
-mv keras-retinanet keras_retinanet
-```
-
-Now replace the image.py in the utils folder in keras_retinanet/keras_retinanet/utils with the one provided in this project.
-
-Rebuild the Cython extensions and reinstall in editable mode:
-
-```bash
 cd keras_retinanet
-
-# Install dependencies
 pip install cython numpy
-
-# Build extensions
 python setup.py build_ext --inplace
-
-# Install in editable mode
 pip install --use-pep517 -e .
 ```
 
-Check the import path again to validate that it points to the keras_retinanet inside this repository and not the module installed in the conda environment using this command in python
+**Verify Installation**:
 
-```bash
+```
+python
+Copy
 import keras_retinanet
-print(keras_retinanet.__file__)
+print(keras_retinanet.__file__)  # Ensure path points to the local repository.
 ```
 
-Regarding the symbolic link, these commands remove the existing symlink (site-packages/keras_retinanet) since pip install -e . handles path resolution.
-
-
-
-
-
 ## Deployment
+**Directory Structure**
 
-Before deploying the project, ensure you have the following directories. If not create them. The app should create them on their own, but for your own reference, these folders are essential for it to function. (They are empty at the start before starting it)
+Create the following directories if they do not exist:
 
+```
+uploads/
+images/
+input/
+output/output_csv/
+ft_upload/
+normalize/
+saved_annotations/
+saved_data/
+converted/         # Clear manually to avoid PNG accumulation
+finaloutput/
+snapshots/         # Critical for model weights
+```
 
-Make sure to have the following folders setup within the repo:
-- uploads
-- images
-- input
-- output
-- output/output_csv
-- ft_upload
-- normalize
-- saved_annotations
-- saved_data
-- converted (has to be manually cleared. PNG images buildup over time)
-- finaloutput
-- snapshots (**IMPORTANT**)
+**Pre-Trained Weights**
 
-Download the following weights and copy them into the /snapshots directory:
+Download and place these files in /snapshots:
+
 [SGN_Rene.h5](https://drive.google.com/file/d/10JCk6W6pC7nVWfHJ7Ew6xvyWLEeKxbV2/view?usp=sharing)
 [combine.h5](https://drive.google.com/file/d/1ADUyTbD1wxKvsMnuvF0YZr5K9Wn5iwk3/view?usp=sharing)
 
-these are essential for the detection and retraining scripts scripts to run successfully. The tool makes use of these folders to store and transfer images, after which they are regularly cleared to prevent buildup/mixing of data.
+Launch Application
+Run the server:
 
-
-
-```bash
-  python app.py
 ```
-
-Then open your browser, and open the following link:
-
-```bash
-127.0.0.1:5000/static/index.html
+python app.py
 ```
-It is hosted on a static IP address, so anyone connected to the same network will be able to access the application. Just replace the localhost (127.0.0.1) IP address with the IP address of your hostname, keep everything else the same.
-Essentially, your directory should roughly look like this:
+Access the tool via browser:
 
+```
+http://127.0.0.1:5000/static/index.html
+```
+For network access, replace 127.0.0.1 with the host machine's IP.
 
+**Directory Structure Example**
 
 ![Screenshot](https://camo.githubusercontent.com/804f51b9960a47677c5fbb0f0a504e35b0f85b6118ac9c7ef096837383f689f4/68747470733a2f2f692e6962622e636f2f33794d66533079462f696d6167652e706e67)
-
 
 ## Acknowledgements
 
  - [COMBINe: Cell detectiOn in Mouse BraIN](https://github.com/yccc12/COMBINe/tree/main)
  - [keras-retinanet](https://github.com/fizyr/keras-retinanet)
-
