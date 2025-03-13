@@ -24,6 +24,7 @@ The tool uses keras-retinanet for detection.
 1) Download the original keras-retinanet from [fizyr/keras-retinanet](https://github.com/fizyr/keras-retinanet). Place it in the app directory. (Make sure that you are using the local keras_retinanet folder and not the module,(make sure keras-retinanet is in editable mode) or else replacing the files will not impact the output. I renamed my keras-retinanet local repository to keras_retinanet, and created a symbolic link to the local folder, so that instead of using the module installed in the conda/python environment, it locates and uses the local files.  
 Replace `./keras_retinanet/utils/image.py`, `./keras_retinanet/utils/colors.py`, and `./keras_retinanet/utils/gpu.py` with the py files provided in the repo.
 
+Ensure that in keras_retinanet/keras_retinanet/bin/train.py, the steps parameter is set to 'None'. The default value in the original script is set to 10000
 
 
 
