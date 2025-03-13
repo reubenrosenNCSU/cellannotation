@@ -2,13 +2,13 @@
 
 [![YouTube Demonstration](https://img.shields.io/badge/YouTube-Demonstration-red)](https://youtu.be/IhLrQrVeXEQ)
 
-A machine learning-based tool for automated detection and annotation of **Spiral Ganglion Neurons (SGN)** and **Mosaic Analysis with Double Markers (MADM)** cells in microscope images. Built on the `keras-retinanet` framework, this tool enables biologists to deploy and refine object detection models without requiring programming expertise.
+A machine learning-based tool for automated detection and annotation of **Spiral Ganglion Neurons (SGN)** cells in microscope images. Built on the `keras-retinanet` framework, this tool enables biologists to deploy and refine object detection models without requiring programming expertise.
 
 ![Screenshot](screenshots/image.png)
 
 ## Features
 
-- **Automated Detection**: Pre-trained models for SGN and MADM cell detection.
+- **Automated Detection**: Pre-trained models for SGN cell detection.
 - **Real-Time Analysis**: Dynamic cell counting during image processing.
 - **Annotation Editing**: Add, modify, or remove annotations post-detection.
 - **Model Customization**: 
