@@ -71,7 +71,6 @@ pip install --use-pep517 -e .
 
 ```
 python
-Copy
 import keras_retinanet
 print(keras_retinanet.__file__)  # Ensure path points to the local repository.
 ```
