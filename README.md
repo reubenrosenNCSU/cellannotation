@@ -1,7 +1,7 @@
 
 # Automatic Cell Annotation Tool
 
-[YouTube Demonstration](https://www.youtube.com/watch?v=FixCSsKJ6qY&ab_channel=ReubenRosen)
+[YouTube Demonstration](https://youtu.be/IhLrQrVeXEQ)
 
 The primary objective is to enable biologists with little to no programming experience to deploy and use ML models for object detection purposes. A cell detection tool (mainly SGN and MADM) which allows a user to use object detection models to detect cells in a microscope image.
 
