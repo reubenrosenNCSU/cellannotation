@@ -86,7 +86,6 @@ images/
 input/
 output/output_csv/
 ft_upload/
-normalize/
 saved_annotations/
 saved_data/
 converted/         # Clear manually to avoid PNG accumulation
