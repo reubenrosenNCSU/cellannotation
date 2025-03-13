@@ -477,7 +477,7 @@ def train_saved_data():
             '--batch-size', '8',
             '--epochs', str(epochs),
             '--snapshot-path', 'snapshots/',
-            'csv', '/home/greenbaumgpu/Reuben/js_annotation/saved_data/merged_annotations.csv',
+            'csv', 'saved_data/merged_annotations.csv',
             os.path.abspath(classes_file)
         ]
 
