@@ -117,6 +117,33 @@ For network access, replace 127.0.0.1 with the host machine's IP.
 
 ![Screenshot](https://camo.githubusercontent.com/804f51b9960a47677c5fbb0f0a504e35b0f85b6118ac9c7ef096837383f689f4/68747470733a2f2f692e6962622e636f2f33794d66533079462f696d6167652e706e67)
 
+## Usage
+
+- Load Image- Allows import of .tif/.tiff files
+- Class - SGN (MADM cell detection is currently in development stage, so there are other classes as well)
+- Crop Image - Click and drag an area to crop a section of an image
+T- oggle Zoom - When active, use mousewheel to zoom in/out, and drag to pan around the image.
+- Visibility can be adjusted using the brightness/contrast slider. The maximum and minimum threshold values for both can also be changed.
+
+- Typical Cell Diameter (px) - adjusts image according to the typical cell diameter of the image, in pixels.
+- Detection Threshold - Adjust the threshold value during cell detection.
+- Clear annotations - Clears all annotations within the image.
+- Export Image and Annotations - Exports the current tiff image and its associated annotations into a zip file.
+- Import Annotations - Import annotations from a .csv file onto the uploaded image.
+- Detect SGN - Detect neurons present in the image.
+- Clear training data - Clear pre-existing data used for training (explained in further steps)
+- Save Training Data - Once an image is imported and annotated, you can use this data to train the model and improve detection. The clear training data button can clear these annotations if you want to use fresh data without mixing it with old data.
+- Fine-tune(Custom) - Upload a .csv file in keras-retinanet format containing annotations, and its associated images, and enter the number of epochs. The trained model weight is automatically downloaded to your PC.
+- Fine-tune(Saved Data) - fine tune the model by entering the number of epochs. The fine-tuned trained model weight is automatically downloaded to your PC.
+- Custom Detect - Once an image is uploaded, you can test your newly downloaded weight on the image and see its detection performance.
+- Save Image - Saves displayed image and its annotations as a PNG and downloads it.
+
+Annotating:
+- Click and drag (when not in crop or zoom mode) to make an annotation
+- Right click on an annotation to delete it
+
+
+
 ## Acknowledgements
 
  - [COMBINe: Cell detectiOn in Mouse BraIN](https://github.com/yccc12/COMBINe/tree/main)
