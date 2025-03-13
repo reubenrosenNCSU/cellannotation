@@ -1,3 +1,18 @@
+"""
+Copyright 2017-2018 Fizyr (https://fizyr.com)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
 
 from __future__ import division
 import numpy as np
@@ -13,47 +28,55 @@ def read_image_bgr(path):
     Args
         path: Path to the image.
     """
-    #image = np.asarray(Image.open(path).convert('RGB')) #modified
+    # We deliberately don't use cv2.imread here, since it gives no feedback on errors while reading the image.
+    # image = np.ascontiguousarray(Image.open(path).convert('RGB'))
     image = cv2.imread(path, cv2.IMREAD_UNCHANGED) # modified for uint16 input
     if len(image.shape) == 2:
         H, W = image.shape
         tmp = np.zeros((H,W,3))
-        tmp[:,:,2] = image #copying red channel into empty tmp img array
-        tmp[:,:,1] = image #copying green channel into empty tmp img array
+        tmp[:,:,1] = image
         image = tmp
-    else:
-        image=image #if image is already bgr, leave it unchanged
     return image # BGR
 
-def preprocess_image(x, mode='caffe', dynamic=False):
-    """Preprocess an image with fixed or dynamic normalization.
+def preprocess_image(x, mode='caffe'):
+    """ Preprocess an image by subtracting the ImageNet mean.
 
-    Args:
-        x: np.array of shape (H, W, 3) or (3, H, W).
-        mode: 'caffe' or 'tf'.
-        dynamic: if True (for SGN), use dynamic normalization;
-                 if False (for MADM), use fixed normalization.
+    Args
+        x: np.array of shape (None, None, 3) or (3, None, None).
+        mode: One of "caffe" or "tf".
+            - caffe: will zero-center each color channel with
+                respect to the ImageNet dataset, without scaling.
+            - tf: will scale pixels between -1 and 1, sample-wise.
+
+    Returns
+        The input with the ImageNet mean subtracted.
     """
-    # Convert to float32 for compatibility
+    # mostly identical to "https://github.com/keras-team/keras-applications/blob/master/keras_applications/imagenet_utils.py"
+    # except for converting RGB -> BGR since we assume BGR already
+
+    # covert always to float32 to keep compatibility with opencv
     x = x.astype(np.float32)
 
     if mode == 'tf':
         x /= 127.5
         x -= 1.
     elif mode == 'caffe':
-        if dynamic:
-            # Dynamic normalization for SGN:
-            for i in range(x.shape[-1]):
-                if x[..., i].sum() > 0:
-                    mean = x[..., i].mean()
-                    std = x[..., i].std()
-                    x[..., i] = ((x[..., i] - mean) / std) * 127.5
-        else:
-            # Fixed normalization for MADM:
-            x /= 257.  # assumes uint16 input
-            x -= [103.939, 116.779, 123.68]
+         for i in range(x.shape[-1]):
+           if x[:,:,i].sum() > 0:
+                
+                # preprocessing
+                mean = x[:,:,i].mean()
+                std = x[:,:,i].std()
+                x[:,:,i] -= mean
+                x[:,:,i] /= std
+                x[:,:,i] *= 127.5
+        
+        # original caffe for uint16
+        # x /= 257. # uint16 input
+        # x -= [103.939, 116.779, 123.68]
 
     return x
+
 
 def adjust_transform_for_image(transform, image, relative_translation):
     """ Adjust a transformation for a specific image.
@@ -189,6 +212,32 @@ def resize_image(img, min_side=800, max_side=1333):
 
     return img, scale
 
+
+def _uniform(val_range):
+    """ Uniformly sample from the given range.
+
+    Args
+        val_range: A pair of lower and upper bound.
+    """
+    return np.random.uniform(val_range[0], val_range[1])
+
+
+def _check_range(val_range, min_val=None, max_val=None):
+    """ Check whether the range is a valid range.
+
+    Args
+        val_range: A pair of lower and upper bound.
+        min_val: Minimal value for the lower bound.
+        max_val: Maximal value for the upper bound.
+    """
+    if val_range[0] > val_range[1]:
+        raise ValueError('interval lower bound > upper bound')
+    if min_val is not None and val_range[0] < min_val:
+        raise ValueError('invalid interval lower bound')
+    if max_val is not None and val_range[1] > max_val:
+        raise ValueError('invalid interval upper bound')
+
+
 def _clip(image):
     """
     Clip and convert an image to np.uint8.
@@ -197,6 +246,7 @@ def _clip(image):
         image: Image to clip.
     """
     return np.clip(image, 0, 255).astype(np.uint8)
+
 
 class VisualEffect:
     """ Struct holding parameters and applying image color transformation.
