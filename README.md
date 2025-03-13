@@ -21,7 +21,7 @@ The tool uses keras-retinanet for detection.
 ## Installation (Linux Tested)
 
 
-1) Download the original keras-retinanet from [fizyr/keras-retinanet](https://github.com/fizyr/keras-retinanet). Place it in the app directory. (Make sure that you are using the local keras_retinanet folder and not the module, or else replacing the files will not impact the output. I renamed my keras-retinanet local repository to keras_retinanet, and created a symbolic link to the local folder, so that instead of using the module installed in the conda/python environment, it locates and uses the local files.  
+1) Download the original keras-retinanet from [fizyr/keras-retinanet](https://github.com/fizyr/keras-retinanet). Place it in the app directory. (Make sure that you are using the local keras_retinanet folder and not the module,(make sure keras-retinanet is in editable mode) or else replacing the files will not impact the output. I renamed my keras-retinanet local repository to keras_retinanet, and created a symbolic link to the local folder, so that instead of using the module installed in the conda/python environment, it locates and uses the local files.  
 Replace `./keras_retinanet/utils/image.py`, `./keras_retinanet/utils/colors.py`, and `./keras_retinanet/utils/gpu.py` with the py files provided in the repo.
 
 
@@ -50,6 +50,46 @@ pip install -r requirements.txt
 Go to the code directory, e.g. `.../keras-retinanet-main/`, in Anaconda Prompt.  
 Install keras-retinanet `pip install . --user`.  
 To run the code directly from the directory, run `python setup.py build_ext --inplace` to compile Cython code.
+
+**How I made sure the module is editable:**
+
+In my case it was referencing cached files, and using the installed module instead of the repo which has to be installed inside this repository. So I had to do a clean reinstall of the module in editable mode. Hence, once you clone this repository, open it and run this command in it
+
+```bash
+git clone https://github.com/fizyr/keras-retinanet.git
+```
+
+this installs the keras-retinanet module into this project. For my code the folder was renamed to keras_retinanet, so run this command
+
+```bash
+mv keras-retinanet keras_retinanet
+```
+
+Now replace the image.py in the utils folder in keras_retinanet/keras_retinanet/utils with the one provided in this project.
+
+Rebuild the Cython extensions and reinstall in editable mode:
+
+```bash
+cd keras_retinanet
+
+# Install dependencies
+pip install cython numpy
+
+# Build extensions
+python setup.py build_ext --inplace
+
+# Install in editable mode
+pip install --use-pep517 -e .
+```
+
+Check the import path again to validate that it points to the keras_retinanet inside this repository and not the module installed in the conda environment using this command in python
+
+```bash
+import keras_retinanet
+print(keras_retinanet.__file__)
+```
+
+Regarding the symbolic link, these commands remove the existing symlink (site-packages/keras_retinanet) since pip install -e . handles path resolution.
 
 
 
