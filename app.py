@@ -12,7 +12,8 @@ from PIL import Image, ImageOps
 import numpy as np
 import zipfile
 import io
-
+import gc  # Garbage collector
+import time  # For delays
 
 app = Flask(__name__)
 CORS(app)  # This will allow all domains to access your API
@@ -23,14 +24,12 @@ app.config['FINAL_OUTPUT_FOLDER'] = 'finaloutput'
 app.config['FT_UPLOAD_FOLDER'] = 'ft_upload'
 app.config['IMAGES_FOLDER'] = 'images'
 app.config['INPUT_FOLDER'] = 'input'
-app.config['NORMALIZE_FOLDER'] = 'normalize'
 app.config['OUTPUT_FOLDER'] = 'output'
 app.config['OUTPUT_CSV_FOLDER'] ='output/output_csv'
 os.makedirs(app.config['FINAL_OUTPUT_FOLDER'], exist_ok=True) #finaloutput
 os.makedirs(app.config['FT_UPLOAD_FOLDER'], exist_ok=True) #ft_upload
 os.makedirs(app.config['IMAGES_FOLDER'], exist_ok=True) #images
 os.makedirs(app.config['INPUT_FOLDER'], exist_ok=True) #input
-os.makedirs(app.config['NORMALIZE_FOLDER'], exist_ok=True) #normalize folder
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True) #output folder
 os.makedirs(app.config['OUTPUT_CSV_FOLDER'], exist_ok=True) #output_csv folder located within output.
 app.config['ORIGINAL_UPLOAD_FOLDER'] = 'original_uploads'
@@ -400,16 +399,23 @@ def detect_madm():
 @app.route('/train-saved', methods=['POST'])
 def train_saved_data():
     try:
+        # Get number of images from form
+        num_images = int(request.form.get('num_images', 7))
+        
         # 1. Copy pre-train images to saved_data
         pre_train_dir = 'pre_train_SGN'
         saved_data_dir = app.config['SAVED_DATA_FOLDER']
-        
-        if os.path.isdir(pre_train_dir):
-            for filename in os.listdir(pre_train_dir):
-                src_path = os.path.join(pre_train_dir, filename)
-                if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.tif')):
-                    dest_path = os.path.join(saved_data_dir, filename)
-                    shutil.copy2(src_path, dest_path)
+
+        # Get sorted list of image files
+        all_images = sorted([f for f in os.listdir(pre_train_dir) 
+                           if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.tif'))])
+        selected_images = all_images[:num_images]  # Take first N
+
+        # Copy selected images
+        for filename in selected_images:
+            src_path = os.path.join(pre_train_dir, filename)
+            dest_path = os.path.join(saved_data_dir, filename)
+            shutil.copy2(src_path, dest_path)
 
         # 2. Merge annotations with pre_annot.csv
         annotations_dir = app.config['SAVED_ANNOTATIONS_FOLDER']
@@ -427,14 +433,17 @@ def train_saved_data():
                     cleaned_lines = [line.strip() + '\n' for line in lines if line.strip()]
                     outfile.writelines(cleaned_lines)
 
-            # Add pre_annot.csv if exists
+            # Add filtered pre_annot.csv
             if os.path.exists(pre_annot_path):
                 with open(pre_annot_path, 'r') as pre_file:
                     lines = pre_file.readlines()
                     if lines:
-                        lines = lines[1:]  # Skip header
-                        cleaned_lines = [line.strip() + '\n' for line in lines if line.strip()]
-                        outfile.writelines(cleaned_lines)
+                        # Filter lines based on selected images
+                        header = lines[0]
+                        for line in lines[1:]:  # Skip header
+                            filename_in_csv = line.split(',')[0].strip()
+                            if filename_in_csv in selected_images:
+                                outfile.write(line.strip() + '\n')
 
         # 2. Verify merged file and images
         if not os.path.exists(output_csv):
@@ -501,15 +510,24 @@ def train_saved_data():
             return jsonify({'error': 'Training process failed'}), 500
 
         # 8. Return latest snapshot
-        # 8. Get the specific snapshot based on epochs
-        epoch_str = f"{epochs:02d}"  # Format as two-digit number
+        epoch_str = f"{epochs:02d}"
         expected_filename = f'resnet50_csv_{epoch_str}.h5'
         snapshot_path = os.path.join('snapshots', expected_filename)
+
+        # ===== START CRITICAL FIX =====
+        # Wait for file to finish writing
+        time.sleep(1)  # Wait 1 second
+        gc.collect()  # Clean up memory
+
+        # Copy using safe binary method
+        fixed_path = os.path.join('snapshots', 'last_used.h5')
+        with open(snapshot_path, 'rb') as src_file, open(fixed_path, 'wb') as dest_file:
+            shutil.copyfileobj(src_file, dest_file)
+        # ===== END CRITICAL FIX =====
         
         if not os.path.exists(snapshot_path):
             return jsonify({'error': f'Expected snapshot {expected_filename} not found'}), 500
 
-        # Validate HDF5 file
         try:
             with h5py.File(snapshot_path, 'r') as f:
                 if 'model_weights' not in f:
@@ -595,19 +613,17 @@ def train_model():
         epoch_str = f"{epochs:02d}"
         expected_filename = f'resnet50_csv_{epoch_str}.h5'
         snapshot_path = os.path.join('snapshots', expected_filename)
-        
-        # Wait for file to be fully written
-        time.sleep(2)  # Safety delay
-        if not os.path.exists(snapshot_path):
-            return jsonify({'error': f'Expected snapshot {expected_filename} not found'}), 500
+    
+            # ===== START CRITICAL FIX =====
+        # Wait for file to finish writing
+        time.sleep(1)  # Wait 1 second
+        gc.collect()  # Clean up memory
 
-        # Validate HDF5 file
-        try:
-            with h5py.File(snapshot_path, 'r') as f:
-                if 'model_weights' not in f:
-                    raise ValueError("Invalid model structure")
-        except Exception as e:
-            return jsonify({'error': f'Invalid model file: {str(e)}'}), 500
+        # Copy using safe binary method
+        fixed_path = os.path.join('snapshots', 'last_used.h5')
+        with open(snapshot_path, 'rb') as src_file, open(fixed_path, 'wb') as dest_file:
+            shutil.copyfileobj(src_file, dest_file)
+        # ===== END CRITICAL FIX =====
 
         return send_file(
             snapshot_path,
@@ -724,6 +740,55 @@ def scale_image():
                 'new_height': new_height
             })
             
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/detect-finetuned', methods=['POST'])
+def detect_finetuned():
+    try:
+        # 1. Get the copied model
+        model_path = os.path.join('snapshots', 'last_used.h5')
+        
+        # 2. Basic validation
+        if not os.path.exists(model_path):
+            return jsonify({'error': 'No trained model found'}), 400
+
+        # 3. Find uploaded image
+        upload_dir = app.config['UPLOAD_FOLDER']
+        image_files = [f for f in os.listdir(upload_dir) if f.endswith(('.tiff', '.tif'))]
+        if not image_files:
+            return jsonify({'error': 'No image uploaded'}), 400
+        image_path = os.path.join(upload_dir, image_files[0])
+
+        # 4. Use same CSV path as custom detection
+        csv_filename = f"{os.path.basename(image_path)}_result.csv"
+        csv_path = os.path.join(app.config['OUTPUT_CSV_FOLDER'], csv_filename)
+
+        # 5. Run detection script
+        subprocess.run([
+            'python3',
+            'scripts/custom_detection.py',
+            image_path,
+            model_path,
+            app.config['OUTPUT_FOLDER']
+        ], check=True)
+
+
+
+        # 6. Read and return results
+        with open(csv_path, 'r') as f:
+            csv_data = f.read()
+
+        #clear directories to prevent buildup of old data:
+
+        for dir_name in CLEANUP_DIRS:
+            dir_path = os.path.join(os.getcwd(), dir_name)
+            if os.path.exists(dir_path):
+                clear_folder(dir_path)
+
+        return jsonify({'annotations': csv_data})
+        
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
