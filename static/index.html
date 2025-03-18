@@ -222,6 +222,8 @@ input[type="number"]::-webkit-outer-spin-button {
         <button class="btn tooltip" data-tooltip="Save data for retraining" id="save-training-data-btn">Save Training Data</button>
         <button class="btn tooltip" data-tooltip="Upload data to retrain" id="fine-tune-btn">Fine-tune (Custom)</button>
         <button class="btn tooltip" data-tooltip="Retrain on saved data" id="fine-tune-saved-btn">Fine-tune (Saved Data)</button>
+        <button class="btn tooltip" 
+        data-tooltip="Use latest trained model" id="detect-finetuned-btn">Detect with Fine-tuned Model</button>
         <button class="btn tooltip" data-tooltip="Load image and test with a custom model" id="custom-detect-btn">Custom Detect</button>
     </div>
 
@@ -411,6 +413,57 @@ async function scaleImage() {
     }
 }
 
+document.getElementById('detect-finetuned-btn').addEventListener('click', detectFinetuned);
+
+async function detectFinetuned() {
+    try {
+        // 1. Call backend
+        const response = await axios.post('/detect-finetuned');
+
+        state.annotations = []; // clear annotations before processing
+        
+        // 2. Process CSV data (SAME AS CUSTOM DETECTION)
+        const csvData = response.data.annotations;
+        const lines = csvData.split('\n');
+        
+        lines.forEach(line => {
+            if (!line.trim()) return;
+            const [filename, x1, y1, x2, y2, className] = line.split(',');
+            
+            // Convert coordinates
+            const x1_num = parseFloat(x1);
+            const y1_num = parseFloat(y1);
+            const x2_num = parseFloat(x2);
+            const y2_num = parseFloat(y2);
+            const [x1_final, y1_final, x2_final, y2_final] = sanitizeBox(x1_num, y1_num, x2_num, y2_num);
+
+            // Find class index
+            const classIndex = CLASS_NAMES.indexOf(className.trim());
+            if (classIndex === -1) return;
+
+            // Add annotation
+            state.annotations.push({
+                x: x1_final,
+                y: y1_final,
+                width: x2_final - x1_final,
+                height: y2_final - y1_final,
+                class: classIndex,
+                isDetected: true
+            });
+        });
+
+        // 3. Update display
+        state.annotations = mergeOverlappingBoxes(state.annotations, 0.3, true);
+        updateCellCounts(state.annotations.length);
+        redraw();
+        alert(`Detected ${state.annotations.length} objects!`);
+
+    } catch (error) {
+        alert('Detection failed: ' + (error.response?.data?.error || error.message));
+    }
+}
+
+
         // CUSTOM DETECTION CODE
         document.getElementById('custom-detect-btn').addEventListener('click', () => {
             document.getElementById('custom-detect-modal').style.display = 'block';
@@ -563,6 +616,7 @@ async function scaleImage() {
         // Handle saved data training
         window.startSavedTraining = async function() {
             try {
+                const numImages = parseInt(document.getElementById('num-images').value) || 7;
                 const modelType = document.getElementById('saved-model-type').value;
                 const epochs = document.getElementById('saved-epochs').value;
 
@@ -574,6 +628,7 @@ async function scaleImage() {
                 const formData = new FormData();
                 formData.append('model_type', modelType);
                 formData.append('epochs', epochs);
+                formData.append('num_images', numImages);
 
                 const response = await axios.post('/train-saved', formData, {
                 responseType: 'blob'  // MUST BE SET
@@ -1327,7 +1382,11 @@ document.getElementById('fine-tune-btn').addEventListener('click', () => {
     </script>
 <div id="saved-train-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; z-index: 1000;">
     <h3>Train with Saved Data</h3>
-    
+    <div style="margin: 10px 0;">
+        <label for="num-images">Pre-train Images (0-7):</label>
+        <input type="number" id="num-images" class="btn" 
+               value="7" min="0" max="7" style="width: 100%;">
+    </div>
     <select id="saved-model-type" class="btn">
         <option value="SGN">SGN</option>
         <option value="MADM">MADM</option>
