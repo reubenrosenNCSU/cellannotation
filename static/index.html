@@ -616,7 +616,11 @@ async function detectFinetuned() {
         // Handle saved data training
         window.startSavedTraining = async function() {
             try {
-                const numImages = parseInt(document.getElementById('num-images').value) || 7;
+                let numImages = parseInt(document.getElementById('num-images').value);
+                if (isNaN(numImages)) {
+                    alert('Invalid number of images! Using default 7.');
+                    numImages = 7;
+                }
                 const modelType = document.getElementById('saved-model-type').value;
                 const epochs = document.getElementById('saved-epochs').value;
 
