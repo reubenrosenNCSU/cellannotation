@@ -409,13 +409,19 @@ def train_saved_data():
         # Get sorted list of image files
         all_images = sorted([f for f in os.listdir(pre_train_dir) 
                            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.tif'))])
-        selected_images = all_images[:num_images]  # Take first N
+        selected_images = []
 
-        # Copy selected images
-        for filename in selected_images:
-            src_path = os.path.join(pre_train_dir, filename)
-            dest_path = os.path.join(saved_data_dir, filename)
-            shutil.copy2(src_path, dest_path)
+        if num_images > 0:
+            # Get sorted list of image files
+            all_images = sorted([f for f in os.listdir(pre_train_dir) 
+                            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.tif'))])
+            selected_images = all_images[:num_images]  # Take first N
+
+            # Copy selected images
+            for filename in selected_images:
+                src_path = os.path.join(pre_train_dir, filename)
+                dest_path = os.path.join(saved_data_dir, filename)
+                shutil.copy2(src_path, dest_path)
 
         # 2. Merge annotations with pre_annot.csv
         annotations_dir = app.config['SAVED_ANNOTATIONS_FOLDER']
