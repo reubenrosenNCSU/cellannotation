@@ -98,7 +98,7 @@ snapshots/         # Critical for model weights
 Download and place these files in /snapshots:
 
 [SGN_Rene.h5](https://drive.google.com/file/d/10JCk6W6pC7nVWfHJ7Ew6xvyWLEeKxbV2/view?usp=sharing)
-[combine.h5](https://drive.google.com/file/d/1ADUyTbD1wxKvsMnuvF0YZr5K9Wn5iwk3/view?usp=sharing)
+[MADMweights.h5](https://drive.google.com/file/d/1Z5Rj1KlvmlEJTZEU8oR0mFJW7sNyFeC5/view?usp=sharing)
 
 Launch Application
 Run the server:
