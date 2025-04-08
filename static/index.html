@@ -232,6 +232,15 @@ input[type="number"]::-webkit-outer-spin-button {
     </div>
 
     <script>
+        window.addEventListener('beforeunload', function(e) {
+            const data = new URLSearchParams();
+            data.append('dummy', '1'); // SendBeacon requires content
+            navigator.sendBeacon('/cleanup', data);
+        });
+
+        window.addEventListener('pagehide', function(e) {
+            axios.post('/cleanup', {}, { withCredentials: true });
+        });
         document.addEventListener('DOMContentLoaded', () => {
             const CLASS_NAMES = [
             'SGN', 
@@ -377,7 +386,9 @@ async function scaleImage() {
         formData.append('diameter', diameter);
         formData.append('original_filename', `${state.imageName}.${state.originalExtension}`);
 
-        const response = await axios.post('/scale-image', formData);
+        const response = await axios.post('/scale-image', formData,{
+            withCredentials: true
+        });
         
         if (response.data.message) {
             alert(response.data.message);
@@ -418,7 +429,9 @@ document.getElementById('detect-finetuned-btn').addEventListener('click', detect
 async function detectFinetuned() {
     try {
         // 1. Call backend
-        const response = await axios.post('/detect-finetuned');
+        const response = await axios.post('/detect-finetuned', {},{
+            withCredentials: true
+        });
 
         state.annotations = []; // clear annotations before processing
         
@@ -489,7 +502,8 @@ async function detectFinetuned() {
                 formData.append('h5_file', modelFile);
 
                 const response = await axios.post('/detect-custom', formData, {
-                    headers: {'Content-Type': 'multipart/form-data'}
+                    headers: {'Content-Type': 'multipart/form-data'},
+                    withCredentials: true
                 });
                 
 
@@ -635,7 +649,8 @@ async function detectFinetuned() {
                 formData.append('num_images', numImages);
 
                 const response = await axios.post('/train-saved', formData, {
-                responseType: 'blob'  // MUST BE SET
+                responseType: 'blob',
+                withCredentials: true
             });
 
             const blob = new Blob([response.data], {type: 'application/octet-stream'});
@@ -655,8 +670,16 @@ async function detectFinetuned() {
             document.getElementById('detect-madm-btn').addEventListener('click', detectMADM);
 
             async function detectMADM() {
+    // Get threshold from input
+    const threshold = parseFloat(document.getElementById('detection-threshold').value);
+    
     try {
-        const response = await axios.post('/detect-madm');
+        // Send threshold in request
+        const response = await axios.post('/detect-madm', { 
+            threshold: threshold 
+        }, {
+            withCredentials: true 
+        });
         const csvData = response.data.annotations;
         
         let rawAnnotations = [];
@@ -710,7 +733,9 @@ async function detectFinetuned() {
                     const confirm = window.confirm('Are you sure you want to delete all training data? This cannot be undone!');
                     if (!confirm) return;
 
-                    await axios.post('/clear-training-data');
+                    await axios.post('/clear-training-data', {}, {
+                        withCredentials: true 
+                    });
                     alert('All training data has been cleared!');
                 } catch (error) {
                     alert('Error clearing training data: ' + error.message);
@@ -746,7 +771,9 @@ async function detectFinetuned() {
 
         formData.append('csv', new Blob([csvData], { type: 'text/csv' }), 'annotations.csv');
 
-        await axios.post('/save-training-data', formData);
+        await axios.post('/save-training-data', formData, {
+            withCredentials: true 
+        });
         alert('Training data saved successfully!');
     } catch (error) {
         alert('Error saving training data: ' + error.message);
@@ -765,7 +792,9 @@ async function detectFinetuned() {
                     return;
                 }
     try {
-        const response = await axios.post('/detect-sgn', { threshold });
+        const response = await axios.post('/detect-sgn', { threshold }, {
+            withCredentials: true 
+        });
         const csvData = response.data.annotations;
         
         // Parse and import the annotations
@@ -827,7 +856,8 @@ async function handleImageUpload(e) {
 
     try {
         const response = await axios.post('/upload', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
+            headers: { 'Content-Type': 'multipart/form-data' },
+            withCredentials: true
         });
 
         const data = response.data;
@@ -1111,7 +1141,8 @@ async function handleImageUpload(e) {
     // Send data to backend to create ZIP
     axios.post('/export-annotations', {
         csv_data: csv,
-        original_filename: filename
+        original_filename: filename,
+        withCredentials: true 
     }, {
         responseType: 'blob' // Important for binary response
     })
@@ -1263,7 +1294,9 @@ function hexToRGBA(hex, alpha) {
         formData.append('width', origWidth);
         formData.append('height', origHeight);
 
-        const response = await axios.post('/upload-cropped', formData);
+        const response = await axios.post('/upload-cropped', formData, {
+            withCredentials: true 
+        });
         
         // Update image display
         const img = new Image();
@@ -1362,7 +1395,8 @@ window.startTraining = async function() {
 
     try {
         const response = await axios.post('/train', formData, {
-            responseType: 'blob'  // Add this line
+            responseType: 'blob',
+            withCredentials: true
         });
 
         // REPLACE THE DOWNLOAD CODE WITH THIS
