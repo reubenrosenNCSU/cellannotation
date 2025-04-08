@@ -118,7 +118,7 @@ def stitchDetection(detections, H, W, xsize=512, ysize=512, step=448):
 
 
 # %% Main code
-def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT = '/home/greenbaumgpu/Reuben/js_annotation/output'  # output dir for images
+def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT = '/home/greenbaumgpu/Reuben/js_annotation/output',  tHRESHOLD = 0.5
 ):
 
     testnames, testpaths = listFile(pATHTEST, '.tif')
@@ -128,16 +128,15 @@ def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT 
                         3: 'green neuron', 4: 'green astrocyte', 5: 'red neuron', 
                         6: 'red astrocyte'}
 
-    tHRESHOLD = 0.5  # threshold for detection confidence score
     xsize = 512
     ysize = 512
     step = 448  # initial step size, can be adjusted dynamically based on image size
 
     classes = list(labels_to_names.values())
     num_class = len(classes)
-    pATHCSV = 'output/output_csv'  # output dir for CSV files
+    pATHCSV = os.path.join(pATHRESULT, 'output_csv')
 
-    model_path = os.path.join('snapshots', 'trainedmodel.h5')
+    model_path = os.path.join('snapshots', 'MADMweights.h5')
 
     # load retinanet model
     model = models.load_model(model_path, backbone_name='resnet50')
@@ -269,8 +268,8 @@ def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT 
                 output_image_path = os.path.join(pATHRESULT, testnames[i] + '_detected.png')
                 cv2.imwrite(output_image_path, fulldraw)
 
-
 if __name__ == "__main__":
     pATHTEST = sys.argv[1]
     pATHRESULT = sys.argv[2]
-    main(pATHTEST, pATHRESULT)
+    tHRESHOLD = float(sys.argv[3])  # Ensure this line exists
+    main(pATHTEST, pATHRESULT, tHRESHOLD)

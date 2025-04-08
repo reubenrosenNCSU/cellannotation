@@ -188,7 +188,7 @@ def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT 
 
     classes = list(labels_to_names.values())
     num_class = len(classes)
-    pATHCSV = 'output/output_csv'  # output dir for CSV files
+    pATHCSV = os.path.join(pATHRESULT, 'output_csv')  # ✅
 
     model_path = os.path.join('snapshots', 'SGN_Rene.h5')
 
