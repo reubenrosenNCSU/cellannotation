@@ -14,32 +14,62 @@ import zipfile
 import io
 import gc  # Garbage collector
 import time  # For delays
+from flask import session
+from datetime import timedelta
+from apscheduler.schedulers.background import BackgroundScheduler
+import datetime
+import atexit
 
 app = Flask(__name__)
-CORS(app)  # This will allow all domains to access your API
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['CONVERTED_FOLDER'] = 'converted'
-app.config['MAX_CONTENT_LENGTH'] = 5000000 * 1024 * 1024  # if it exceeds 50MB limit
-app.config['FINAL_OUTPUT_FOLDER'] = 'finaloutput'
-app.config['FT_UPLOAD_FOLDER'] = 'ft_upload'
-app.config['IMAGES_FOLDER'] = 'images'
-app.config['INPUT_FOLDER'] = 'input'
-app.config['OUTPUT_FOLDER'] = 'output'
-app.config['OUTPUT_CSV_FOLDER'] ='output/output_csv'
-os.makedirs(app.config['FINAL_OUTPUT_FOLDER'], exist_ok=True) #finaloutput
-os.makedirs(app.config['FT_UPLOAD_FOLDER'], exist_ok=True) #ft_upload
-os.makedirs(app.config['IMAGES_FOLDER'], exist_ok=True) #images
-os.makedirs(app.config['INPUT_FOLDER'], exist_ok=True) #input
-os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True) #output folder
-os.makedirs(app.config['OUTPUT_CSV_FOLDER'], exist_ok=True) #output_csv folder located within output.
-app.config['ORIGINAL_UPLOAD_FOLDER'] = 'original_uploads'
-os.makedirs(app.config['ORIGINAL_UPLOAD_FOLDER'], exist_ok=True)
+CORS(app, supports_credentials=True)  # This will allow all domains to access your API
+
+app.secret_key = 'test'  # Replace with a real secret key
 
 
+@app.before_request
+def set_user_session():
+    if 'user_id' not in session:
+        session.permanent = True
+        session['user_id'] = str(uuid.uuid4())
+    
+    # Always update directory modification time on any request
+    user_id = session['user_id']
+    user_dir = os.path.join('users', user_id)
+    if os.path.exists(user_dir):
+        os.utime(user_dir, None)  # Update mtime on every request
+    # Create user directories if they don't exist
+    user_id = session['user_id']
+    user_dirs = [
+        os.path.join('users', user_id, 'uploads'),
+        os.path.join('users', user_id, 'converted'),
+        os.path.join('users', user_id, 'saved_data'),
+        os.path.join('users', user_id, 'saved_annotations'),
+        os.path.join('users', user_id, 'finaloutput'),
+        os.path.join('users', user_id, 'ft_upload'),
+        os.path.join('users', user_id, 'images'),
+        os.path.join('users', user_id, 'input'),
+        os.path.join('users', user_id, 'output'),
+        os.path.join('users', user_id, 'output/output_csv'),
+        os.path.join('users', user_id, 'snapshots')
+    ]
+    for dir_path in user_dirs:
+        os.makedirs(dir_path, exist_ok=True)
 
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)  # Session expires after 1 hour
 
-
-
+@app.route('/cleanup', methods=['POST'])
+def cleanup_files():
+    try:
+        user_id = session.get('user_id')
+        if user_id:
+            user_dir = os.path.join('users', user_id)
+            if os.path.exists(user_dir):
+                shutil.rmtree(user_dir)
+                print(f"Cleaned up directory for user: {user_id}")
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        print(f"Cleanup error: {str(e)}")
+        return jsonify({'status': 'error'}), 500
 
 
 
@@ -47,26 +77,6 @@ os.makedirs(app.config['ORIGINAL_UPLOAD_FOLDER'], exist_ok=True)
 CLEANUP_DIRS = ['output', 'input', 'images']
 
 # Create directories if they don't exist
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True) #generate uploads folder
-os.makedirs(app.config['CONVERTED_FOLDER'], exist_ok=True) #generate converted folder
-
-app.config['SAVED_DATA_FOLDER'] = 'saved_data'
-app.config['SAVED_ANNOTATIONS_FOLDER'] = 'saved_annotations'
-os.makedirs(app.config['SAVED_DATA_FOLDER'], exist_ok=True)
-os.makedirs(app.config['SAVED_ANNOTATIONS_FOLDER'], exist_ok=True)
-
-def clear_uploaded_images():
-    """Delete all files in uploads folder"""
-    upload_dir = app.config['UPLOAD_FOLDER']
-    for filename in os.listdir(upload_dir):
-        file_path = os.path.join(upload_dir, filename)
-        if os.path.isfile(file_path):
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                print(f"Error deleting {file_path}: {e}")
-
-# Function to clear files inside a folder, keeping the folder structure intact
 def clear_folder(folder):
     for filename in os.listdir(folder):
         file_path = os.path.join(folder, filename)
@@ -75,8 +85,25 @@ def clear_folder(folder):
         elif os.path.isdir(file_path):
             clear_folder(file_path)
 
+
+
+def clear_uploaded_images():
+    """Delete all files in the current user's upload folder"""
+    user_id = session.get('user_id', 'default')  # Handle unauthenticated edge case
+    user_upload_dir = os.path.join('users', user_id, 'uploads')
+    for filename in os.listdir(user_upload_dir):
+        file_path = os.path.join(user_upload_dir, filename)
+        if os.path.isfile(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"Error deleting {file_path}: {e}")
+
+
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    user_id = session['user_id']
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
         
@@ -89,6 +116,8 @@ def upload_file():
         original_name = file.filename
         base_name = os.path.splitext(original_name)[0]
         original_extension = os.path.splitext(original_name)[1][1:].lower()
+        user_upload_dir = os.path.join('users', user_id, 'uploads')
+        user_converted_dir = os.path.join('users', user_id, 'converted')
 
         # Read image and ensure RGB (3 channels)
         with Image.open(file.stream) as img:
@@ -97,17 +126,17 @@ def upload_file():
                 img = img.convert('RGB')
             
             # Save original to preservation folder
-            original_preserve_path = os.path.join(app.config['ORIGINAL_UPLOAD_FOLDER'], original_name)
+            original_preserve_path = os.path.join(user_upload_dir, original_name)
             img.save(original_preserve_path, format='TIFF', compression='tiff_deflate')
             
             # Save processed RGB copy to working uploads
-            upload_path = os.path.join(app.config['UPLOAD_FOLDER'], original_name)
+            upload_path = os.path.join(user_upload_dir, original_name)
             img.save(upload_path, format='TIFF', compression='tiff_deflate')
 
         # Generate preview (must be inside the try block)
         unique_id = str(uuid.uuid4())
         output_filename = f"{unique_id}.png"
-        output_path = os.path.join(app.config['CONVERTED_FOLDER'], output_filename)
+        output_path = os.path.join(user_converted_dir, output_filename)
         
         with Image.open(upload_path) as img:
             # Normalize 16-bit data for PNG preview
@@ -136,14 +165,16 @@ def upload_file():
     
 @app.route('/export-annotations', methods=['POST'])
 def export_annotations():
+    user_id = session['user_id']
     try:
         # Get both CSV data and current image name from request
         data = request.json
         csv_data = data['csv_data']
         original_filename = data['original_filename']
+        user_upload_dir = os.path.join('users', user_id, 'uploads')
 
         # Get current TIFF path
-        tiff_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+        tiff_path = os.path.join(user_upload_dir, original_filename)
         if not os.path.exists(tiff_path):
             return jsonify({'error': 'Current TIFF file not found'}), 404
 
@@ -169,6 +200,7 @@ def export_annotations():
 
 @app.route('/upload-cropped', methods=['POST'])
 def upload_cropped_file():
+    user_id = session['user_id']
     try:
         # Get crop coordinates and original filename
         original_name = request.form['original_filename']
@@ -176,9 +208,11 @@ def upload_cropped_file():
         y = int(float(request.form['y']))
         width = int(float(request.form['width']))
         height = int(float(request.form['height']))
+        user_upload_dir = os.path.join('users', user_id, 'uploads')
+        user_convert_dir = os.path.join('users', user_id, 'converted')
 
         # Path to original TIFF
-        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], original_name)
+        upload_path = os.path.join(user_upload_dir, original_name)
         
         # Open and crop original image
         with Image.open(upload_path) as img:
@@ -191,7 +225,7 @@ def upload_cropped_file():
         # Generate new PNG preview from updated TIFF
         unique_id = str(uuid.uuid4())
         output_filename = f"{unique_id}.png"
-        output_path = os.path.join(app.config['CONVERTED_FOLDER'], output_filename)
+        output_path = os.path.join(user_convert_dir, output_filename)
         cropped_img.save(output_path, "PNG")
 
         return jsonify({
@@ -207,25 +241,36 @@ def upload_cropped_file():
     
 @app.route('/detect-sgn', methods=['POST'])
 def detect_sgn():
+    user_id = session['user_id']
+    user_cleanup_dirs = [
+        os.path.join('users', user_id, 'output'),
+        os.path.join('users', user_id, 'input'),
+        os.path.join('users', user_id, 'images')
+    ]
     try:
         # Find the uploaded image
-        upload_dir = app.config['UPLOAD_FOLDER']
+        upload_dir = os.path.join('users', user_id, 'uploads')
+        finaloutput_dir = os.path.join('users', user_id, 'finaloutput')
+        output_dir = os.path.join('users', user_id, 'output')
+        output_csv_dir = os.path.join('users', user_id, 'output/output_csv')
+        input_dir = os.path.join('users', user_id, 'input')
+        images_dir = os.path.join('users', user_id, 'images')
         threshold = request.json.get('threshold', 0.5)
         uploaded_files = [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]
-        output_csv_file = os.path.join(app.config['FINAL_OUTPUT_FOLDER'], 'annotations.csv')
+        output_csv_file = os.path.join(finaloutput_dir, 'annotations.csv')
         
         if not uploaded_files:
             return jsonify({'error': 'No image found. Upload an image first.'}), 400
             
         filepath = os.path.join(upload_dir, uploaded_files[0])
-        final_output = app.config['FINAL_OUTPUT_FOLDER']
+        final_output = finaloutput_dir
 
         # Run processing pipeline
         scripts = [
-            ['python3', 'scripts/8to16bit.py', app.config['UPLOAD_FOLDER'], app.config['INPUT_FOLDER']],
-            ['python3', 'scripts/splitimage.py', app.config['INPUT_FOLDER'], app.config['IMAGES_FOLDER']],
-            ['python3', 'scripts/detection_SGN.py', app.config['IMAGES_FOLDER'], app.config['OUTPUT_FOLDER'], str(threshold)],
-            ['python3', 'scripts/mergecsv.py', app.config['OUTPUT_CSV_FOLDER'], output_csv_file]
+            ['python3', 'scripts/8to16bit.py', upload_dir, input_dir],
+            ['python3', 'scripts/splitimage.py', input_dir, images_dir],
+            ['python3', 'scripts/detection_SGN.py', images_dir, output_dir, str(threshold)],
+            ['python3', 'scripts/mergecsv.py', output_csv_dir, output_csv_file]
         ]
 
         for script in scripts:
@@ -255,7 +300,7 @@ def detect_sgn():
                 }), 500
 
         # Cleanup directories
-        for dir_name in CLEANUP_DIRS:
+        for dir_name in user_cleanup_dirs:
             dir_path = os.path.join(os.getcwd(), dir_name)
             if os.path.exists(dir_path):
                 clear_folder(dir_path)
@@ -275,22 +320,28 @@ def detect_sgn():
 
 @app.route('/converted/<filename>')
 def serve_converted(filename):
-    return send_from_directory(app.config['CONVERTED_FOLDER'], filename)
+    user_id = session['user_id']
+    converted_dir = os.path.join('users', user_id, 'converted')
+    return send_from_directory(converted_dir, filename)
 
 @app.route('/save-training-data', methods=['POST'])
 def save_training_data():
+    user_id = session['user_id']
+    upload_dir = os.path.join('users', user_id, 'uploads')
+    saved_data_dir = os.path.join('users', user_id, 'saved_data')
+    csv_data_dir = os.path.join('users', user_id, 'saved_annotations')
     try:
         # Get processing parameters
         original_filename = request.form['original_filename']
         
         # Load original image directly without any processing
-        original_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+        original_path = os.path.join(upload_dir, original_filename)
         if not os.path.exists(original_path):
             return jsonify({'error': 'Original image not found'}), 400
 
         # Create output filename
         tiff_filename = original_filename
-        image_path = os.path.join(app.config['SAVED_DATA_FOLDER'], tiff_filename)
+        image_path = os.path.join(saved_data_dir, tiff_filename)
         
         # Convert directly to TIFF without any adjustments
         with Image.open(original_path) as img:
@@ -303,7 +354,7 @@ def save_training_data():
         # Save CSV (rest remains the same)
         csv_file = request.files['csv']
         csv_filename = f"{uuid.uuid4()}.csv"
-        csv_path = os.path.join(app.config['SAVED_ANNOTATIONS_FOLDER'], csv_filename)
+        csv_path = os.path.join(csv_data_dir, csv_filename)
         csv_file.save(csv_path)
 
         return jsonify({'message': 'Training data saved successfully'})
@@ -314,13 +365,16 @@ def save_training_data():
 
 @app.route('/clear-training-data', methods=['POST'])
 def clear_training_data():
+    user_id = session['user_id']
+    saved_data_dir = os.path.join('users', user_id, 'saved_data')
+    saved_annotations_dir = os.path.join('users', user_id, 'saved_data')
     try:
         # Clear saved data
-        data_folder = app.config['SAVED_DATA_FOLDER']
+        data_folder = saved_data_dir
         clear_folder(data_folder)
         
         # Clear saved annotations
-        annotations_folder = app.config['SAVED_ANNOTATIONS_FOLDER']
+        annotations_folder = saved_annotations_dir
         clear_folder(annotations_folder)
         
         return jsonify({'message': 'Training data cleared successfully'})
@@ -331,24 +385,37 @@ def clear_training_data():
 
 @app.route('/detect-madm', methods=['POST'])
 def detect_madm():
+    user_id = session['user_id']
     try:
         # Find the uploaded image
-        upload_dir = app.config['UPLOAD_FOLDER']
+        upload_dir = os.path.join('users', user_id, 'uploads')
+        input_dir = os.path.join('users', user_id, 'input')
+        images_dir = os.path.join('users', user_id, 'images')
+        finaloutput_dir = os.path.join('users', user_id, 'finaloutput')
+        output_dir = os.path.join('users', user_id, 'output')
+        output_csv_dir = os.path.join('users', user_id, 'output/output_csv')
         uploaded_files = [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]
+        threshold = request.json.get('threshold', 0.5)
+
+        user_cleanup_dirs = [
+        os.path.join('users', user_id, 'output'),
+        os.path.join('users', user_id, 'input'),
+        os.path.join('users', user_id, 'images')
+        ]
         
         if not uploaded_files:
             return jsonify({'error': 'No image found. Upload an image first.'}), 400
             
         filepath = os.path.join(upload_dir, uploaded_files[0])
-        final_output = app.config['FINAL_OUTPUT_FOLDER']
-        output_csv_file = os.path.join(app.config['FINAL_OUTPUT_FOLDER'], 'annotations.csv')
+        final_output = finaloutput_dir
+        output_csv_file = os.path.join(finaloutput_dir, 'annotations.csv')
 
         # Run processing pipeline with detection.py
         scripts = [
-            ['python3', 'scripts/8to16bit.py', app.config['UPLOAD_FOLDER'], app.config['INPUT_FOLDER']],
-            ['python3', 'scripts/splitimage.py', app.config['INPUT_FOLDER'], app.config['IMAGES_FOLDER']],
-            ['python3', 'scripts/detection.py', app.config['IMAGES_FOLDER'], app.config['OUTPUT_FOLDER']],
-            ['python3', 'scripts/mergecsv.py', app.config['OUTPUT_CSV_FOLDER'], output_csv_file]
+            ['python3', 'scripts/8to16bit.py', upload_dir, input_dir],
+            ['python3', 'scripts/splitimage.py', input_dir, images_dir],
+            ['python3', 'scripts/detection.py', images_dir, output_dir, str(threshold)],
+            ['python3', 'scripts/mergecsv.py', output_csv_dir, output_csv_file]
         ]
 
         for script in scripts:
@@ -378,7 +445,7 @@ def detect_madm():
                 }), 500
 
         # Cleanup directories
-        for dir_name in CLEANUP_DIRS:
+        for dir_name in user_cleanup_dirs:
             dir_path = os.path.join(os.getcwd(), dir_name)
             if os.path.exists(dir_path):
                 clear_folder(dir_path)
@@ -398,13 +465,15 @@ def detect_madm():
 
 @app.route('/train-saved', methods=['POST'])
 def train_saved_data():
+    user_id = session['user_id']
+    user_snapshot_dir = os.path.join('users', user_id, 'snapshots')
     try:
         # Get number of images from form
         num_images = int(request.form.get('num_images', 7))
         
         # 1. Copy pre-train images to saved_data
         pre_train_dir = 'pre_train_SGN'
-        saved_data_dir = app.config['SAVED_DATA_FOLDER']
+        saved_data_dir = os.path.join('users', user_id, 'saved_data')
 
         # Get sorted list of image files
         all_images = sorted([f for f in os.listdir(pre_train_dir) 
@@ -424,8 +493,8 @@ def train_saved_data():
                 shutil.copy2(src_path, dest_path)
 
         # 2. Merge annotations with pre_annot.csv
-        annotations_dir = app.config['SAVED_ANNOTATIONS_FOLDER']
-        output_csv = os.path.join(app.config['SAVED_DATA_FOLDER'], 'merged_annotations.csv')
+        annotations_dir = os.path.join('users', user_id, 'saved_annotations')
+        output_csv = os.path.join(saved_data_dir, 'merged_annotations.csv')
         pre_annot_path = os.path.join(pre_train_dir, 'pre_annot.csv')
 
         with open(output_csv, 'w') as outfile:
@@ -455,7 +524,7 @@ def train_saved_data():
         if not os.path.exists(output_csv):
             return jsonify({'error': 'Merged annotations failed to create'}), 500
             
-        images_dir = app.config['SAVED_DATA_FOLDER']
+        images_dir = saved_data_dir
         image_files = [f for f in os.listdir(images_dir) 
                       if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.tif'))]
         if not image_files:
@@ -479,7 +548,7 @@ def train_saved_data():
             return jsonify({'error': f'Class file {classes_file} not found'}), 400
 
         # 5. Verify weights exist
-        weights_path = 'snapshots/SGN_Rene.h5' if model_type == 'SGN' else 'snapshots/combine.h5'
+        weights_path = 'snapshots/SGN_Rene.h5' if model_type == 'SGN' else 'snapshots/MADMweights.h5'
         if not os.path.exists(weights_path):
             return jsonify({'error': f'Weights file not found at {weights_path}'}), 400
 
@@ -491,8 +560,8 @@ def train_saved_data():
             '--lr', '1e-4',
             '--batch-size', '8',
             '--epochs', str(epochs),
-            '--snapshot-path', 'snapshots/',
-            'csv', 'saved_data/merged_annotations.csv',
+            '--snapshot-path', user_snapshot_dir,  # ✅ User-specific snapshots
+            'csv', output_csv,
             os.path.abspath(classes_file)
         ]
 
@@ -518,7 +587,7 @@ def train_saved_data():
         # 8. Return latest snapshot
         epoch_str = f"{epochs:02d}"
         expected_filename = f'resnet50_csv_{epoch_str}.h5'
-        snapshot_path = os.path.join('snapshots', expected_filename)
+        snapshot_path = os.path.join(user_snapshot_dir, expected_filename)
 
         # ===== START CRITICAL FIX =====
         # Wait for file to finish writing
@@ -526,7 +595,7 @@ def train_saved_data():
         gc.collect()  # Clean up memory
 
         # Copy using safe binary method
-        fixed_path = os.path.join('snapshots', 'last_used.h5')
+        fixed_path = os.path.join(user_snapshot_dir, 'last_used.h5')  # ✅
         with open(snapshot_path, 'rb') as src_file, open(fixed_path, 'wb') as dest_file:
             shutil.copyfileobj(src_file, dest_file)
         # ===== END CRITICAL FIX =====
@@ -554,6 +623,9 @@ def train_saved_data():
 
 @app.route('/train', methods=['POST'])
 def train_model():
+    user_id = session['user_id']
+    user_snapshot_dir = os.path.join('users', user_id, 'snapshots')
+
     try:
         # Clean and setup directories
         shutil.rmtree('ft_upload', ignore_errors=True)
@@ -572,7 +644,7 @@ def train_model():
         model_type = request.form.get('model_type', 'SGN')
         epochs = request.form.get('epochs', '10')
         classes_file = 'monochrome.csv' if model_type == 'SGN' else 'color.csv'  # Define classes_file
-        weights_file = 'snapshots/SGN_Rene.h5' if model_type == 'SGN' else 'snapshots/combine.h5'
+        weights_file = 'snapshots/SGN_Rene.h5' if model_type == 'SGN' else 'snapshots/MADMweights.h5'
 
         # Validate epochs
         try:
@@ -589,7 +661,7 @@ def train_model():
             '--lr', '1e-4',
             '--batch-size', '8',
             '--epochs', str(epochs),
-            '--snapshot-path', 'snapshots/',
+            '--snapshot-path', user_snapshot_dir,  # ✅ User-specific snapshots
             'csv', 
             csv_path,  # Now defined
             classes_file  # Now defined
@@ -618,7 +690,7 @@ def train_model():
         # Get specific snapshot based on epochs
         epoch_str = f"{epochs:02d}"
         expected_filename = f'resnet50_csv_{epoch_str}.h5'
-        snapshot_path = os.path.join('snapshots', expected_filename)
+        snapshot_path = os.path.join(user_snapshot_dir, expected_filename)
     
             # ===== START CRITICAL FIX =====
         # Wait for file to finish writing
@@ -626,7 +698,7 @@ def train_model():
         gc.collect()  # Clean up memory
 
         # Copy using safe binary method
-        fixed_path = os.path.join('snapshots', 'last_used.h5')
+        fixed_path = os.path.join(user_snapshot_dir, 'last_used.h5')
         with open(snapshot_path, 'rb') as src_file, open(fixed_path, 'wb') as dest_file:
             shutil.copyfileobj(src_file, dest_file)
         # ===== END CRITICAL FIX =====
@@ -644,12 +716,13 @@ def train_model():
     
 @app.route('/detect-custom', methods=['POST'])
 def detect_custom():
+    user_id = session['user_id']
     try:
         # Get uploaded model and image
         h5_file = request.files['h5_file']
         model_type = request.form.get('model_type', 'SGN')  # Get model type from form
-        upload_dir = app.config['UPLOAD_FOLDER']
-        final_output = app.config['FINAL_OUTPUT_FOLDER']
+        upload_dir = os.path.join('users', user_id, 'uploads')
+        final_output = os.path.join('users', user_id, 'finaloutput')
         
         # Save model temporarily
         model_path = os.path.join(upload_dir, secure_filename(h5_file.filename))
@@ -708,6 +781,9 @@ def detect_custom():
 
 @app.route('/scale-image', methods=['POST'])
 def scale_image():
+    user_id = session['user_id']
+    upload_dir = os.path.join('users', user_id, 'uploads')
+    converted_dir = os.path.join('users', user_id, 'converted')
     try:
         diameter = float(request.form['diameter'])
         original_filename = request.form['original_filename']
@@ -719,7 +795,7 @@ def scale_image():
         scaling_factor = 34.0 / diameter
 
         # Get CURRENT image path (from UPLOAD_FOLDER, not original)
-        current_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+        current_path = os.path.join(upload_dir, original_filename)
         if not os.path.exists(current_path):
             return jsonify({'error': 'Current image not found'}), 400
 
@@ -730,13 +806,13 @@ def scale_image():
             resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
             
             # Save scaled version to uploads (overwrite current)
-            upload_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+            upload_path = os.path.join(upload_dir, original_filename)
             resized_img.save(upload_path, format='TIFF', compression='tiff_deflate')
             
             # Generate new preview
             unique_id = str(uuid.uuid4())
             output_filename = f"{unique_id}.png"
-            output_path = os.path.join(app.config['CONVERTED_FOLDER'], output_filename)
+            output_path = os.path.join(converted_dir, output_filename)
             resized_img.save(output_path, "PNG")
 
             return jsonify({
@@ -751,16 +827,25 @@ def scale_image():
     
 @app.route('/detect-finetuned', methods=['POST'])
 def detect_finetuned():
+    user_id = session['user_id']
+    user_cleanup_dirs = [
+            os.path.join('users', user_id, 'output'),
+            os.path.join('users', user_id, 'input'),
+            os.path.join('users', user_id, 'images')
+        ]
     try:
         # 1. Get the copied model
-        model_path = os.path.join('snapshots', 'last_used.h5')
+        user_snapshot_dir = os.path.join('users', user_id, 'snapshots')
+        model_path = os.path.join(user_snapshot_dir, 'last_used.h5')  # ✅ User's model
         
         # 2. Basic validation
         if not os.path.exists(model_path):
             return jsonify({'error': 'No trained model found'}), 400
 
         # 3. Find uploaded image
-        upload_dir = app.config['UPLOAD_FOLDER']
+        upload_dir = os.path.join('users', user_id, 'uploads')
+        output_dir = os.path.join('users', user_id, 'output')
+        output_csv_dir = os.path.join('users', user_id, 'output', 'output_csv')
         image_files = [f for f in os.listdir(upload_dir) if f.endswith(('.tiff', '.tif'))]
         if not image_files:
             return jsonify({'error': 'No image uploaded'}), 400
@@ -768,7 +853,7 @@ def detect_finetuned():
 
         # 4. Use same CSV path as custom detection
         csv_filename = f"{os.path.basename(image_path)}_result.csv"
-        csv_path = os.path.join(app.config['OUTPUT_CSV_FOLDER'], csv_filename)
+        csv_path = os.path.join(output_csv_dir, csv_filename)
 
         # 5. Run detection script
         subprocess.run([
@@ -776,7 +861,7 @@ def detect_finetuned():
             'scripts/custom_detection.py',
             image_path,
             model_path,
-            app.config['OUTPUT_FOLDER']
+            output_dir
         ], check=True)
 
 
@@ -787,7 +872,7 @@ def detect_finetuned():
 
         #clear directories to prevent buildup of old data:
 
-        for dir_name in CLEANUP_DIRS:
+        for dir_name in user_cleanup_dirs:
             dir_path = os.path.join(os.getcwd(), dir_name)
             if os.path.exists(dir_path):
                 clear_folder(dir_path)
@@ -797,6 +882,28 @@ def detect_finetuned():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+def delete_expired_sessions():
+    now = datetime.datetime.utcnow()  # Use UTC time
+    users_dir = 'users'
+    for user_id in os.listdir(users_dir):
+        user_path = os.path.join(users_dir, user_id)
+        if os.path.isdir(user_path):
+            try:
+                mod_time = datetime.datetime.utcfromtimestamp(os.path.getmtime(user_path))
+                if (now - mod_time).total_seconds() > 3600:
+                    shutil.rmtree(user_path)
+                    print(f"Cleaned expired session: {user_id}")
+            except Exception as e:
+                print(f"Error cleaning {user_id}: {str(e)}")
+# Initialize scheduler
+scheduler = BackgroundScheduler()
+scheduler.add_job(func=delete_expired_sessions, trigger="interval", hours=1)
+scheduler.start()
+
+# Shut down the scheduler when exiting the app
+atexit.register(lambda: scheduler.shutdown())
 
 
 if __name__ == '__main__':
