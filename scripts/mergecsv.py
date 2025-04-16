@@ -45,9 +45,12 @@ def adjust_bounding_boxes(input_csv_dir, output_csv_file, tile_size=(512, 512)):
                 adjusted_y_min = y_min + top
                 adjusted_x_max = x_max + left
                 adjusted_y_max = y_max + top
+
+                #extract the original name
+                original_name = "_".join(tile_filename.split('_')[:-3]) + os.path.splitext(tile_filename)[1]
                 
                 # Append the adjusted annotation with the full image filename
-                adjusted_annotations.append(['detections.png', adjusted_x_min, adjusted_y_min, adjusted_x_max, adjusted_y_max] + row[5:])
+                adjusted_annotations.append([original_name, adjusted_x_min, adjusted_y_min, adjusted_x_max, adjusted_y_max] + row[5:])
     
     # Write the adjusted annotations to a new CSV file
     with open(output_csv_file, mode='w', newline='') as file:
