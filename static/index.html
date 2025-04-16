@@ -142,6 +142,27 @@ input[type="number"]::-webkit-outer-spin-button {
     -webkit-appearance: none;
     margin: 0;
 }
+.color-picker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.color-picker label {
+    flex: 1;
+    font-size: 0.9em;
+    color: #666;
+}
+
+.color-picker input[type="color"] {
+    width: 40px;
+    height: 30px;
+    padding: 2px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    cursor: pointer;
+}
     </style>
 </head>
 <body>
@@ -151,7 +172,7 @@ input[type="number"]::-webkit-outer-spin-button {
         
         <input type="file" id="image-input" accept=".tiff,.tif">
         <button class="btn tooltip" data-tooltip="Load an .tif/.tiff file into the tool" id="load-image-btn">Load Image</button>
-        
+        <button class="btn" id="batch-btn">Batch Detect</button>
         <div class="slider-container">
             <label>Class:</label>
             <select id="class-select" class="btn">
@@ -163,6 +184,10 @@ input[type="number"]::-webkit-outer-spin-button {
                 <option value="5">red neuron</option>
                 <option value="6">red astrocyte</option>
             </select>
+        </div>
+        <div class="color-pickers">
+            <h4>Class Colors</h4>
+            <div id="color-picker-container"></div>
         </div>
 
         <button class="btn tooltip" data-tooltip="Select Region of Interest (ROI)" id="crop-btn">Crop Image</button>
@@ -197,6 +222,9 @@ input[type="number"]::-webkit-outer-spin-button {
                 <button class="btn tooltip" data-tooltip="Scale image to optimize detection" 
                         id="scale-btn">Scale</button>
             </div>
+        </div>
+        <div class="cell-count">
+            Detected Cell Diameter: <span id="cell-diameter-display">0</span> px
         </div>
         <div class="slider-container">
             <label>Detection Threshold:</label>
@@ -251,16 +279,36 @@ input[type="number"]::-webkit-outer-spin-button {
             'red neuron',   
             'red astrocyte'   
         ];
+        const colorContainer = document.getElementById('color-picker-container');
+        const DEFAULT_COLORS = [
+            '#CCFF00', '#FFD700', '#FFA500', 
+            '#32CD32', '#006400', '#FF0000', '#8B0000'
+        ];
 
-            const COLORS = [
-                '#CCFF00', // 0. SGN (Gray)
-                '#FFD700', // 1. Yellow Neuron (Gold)
-                '#FFA500', // 2. Yellow Astrocyte (Orange)
-                '#32CD32', // 3. Green Neuron (Lime Green)
-                '#006400', // 4. Green Astrocyte (Dark Green)
-                '#FF0000', // 5. Red Neuron (Bright Red)
-                '#8B0000'  // 6. Red Astrocyte (Dark Red)
-            ];
+        CLASS_NAMES.forEach((className, index) => {
+            const div = document.createElement('div');
+            div.className = 'color-picker';
+            
+            const label = document.createElement('label');
+            label.textContent = className;
+            
+            const input = document.createElement('input');
+            input.type = 'color';
+            input.value = DEFAULT_COLORS[index];
+            input.dataset.classIndex = index;
+            
+            div.appendChild(label);
+            div.appendChild(input);
+            colorContainer.appendChild(div);
+        });
+
+        // Function to get current color for a class
+        function getClassColor(classIndex) {
+            return document.querySelector(
+                `input[data-class-index="${classIndex}"]`
+            ).value;
+        }
+
 
             // State Management
             let state = {
@@ -468,6 +516,7 @@ async function detectFinetuned() {
         // 3. Update display
         state.annotations = mergeOverlappingBoxes(state.annotations, 0.3, true);
         updateCellCounts(state.annotations.length);
+        updateDetectedDiameter();
         redraw();
         alert(`Detected ${state.annotations.length} objects!`);
 
@@ -475,6 +524,58 @@ async function detectFinetuned() {
         alert('Detection failed: ' + (error.response?.data?.error || error.message));
     }
 }
+
+document.getElementById('batch-btn').addEventListener('click', () => {
+    document.getElementById('batch-modal').style.display = 'block';
+});
+
+document.getElementById('detection-type').addEventListener('change', function(e) {
+    document.getElementById('custom-model-ui').style.display = 
+        e.target.value === 'custom' ? 'block' : 'none';
+});
+
+document.getElementById('batch-files').addEventListener('change', function(e) {
+    document.getElementById('file-count').textContent = 
+        `${e.target.files.length} files selected`;
+});
+
+document.getElementById('start-batch').addEventListener('click', async () => {
+    const files = document.getElementById('batch-files').files;
+    if (files.length === 0) return alert('Please select images!');
+    
+    const formData = new FormData();
+    formData.append('detection_type', document.getElementById('detection-type').value);
+    formData.append('threshold', document.getElementById('batch-threshold').value);
+    
+    Array.from(files).forEach(file => formData.append('images', file));
+    
+    if (document.getElementById('detection-type').value === 'custom') {
+        const model = document.getElementById('custom-model').files[0];
+        if (!model) return alert('Please select a model!');
+        formData.append('custom_model', model);
+    }
+    
+    try {
+        const response = await axios.post('/batch-detect', formData, {
+            headers: {'Content-Type': 'multipart/form-data'},
+            responseType: 'blob',
+            withCredentials: true
+        });
+        
+        // Download ZIP
+        const url = window.URL.createObjectURL(response.data);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'batch_results.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        document.getElementById('batch-modal').style.display = 'none';
+    } catch (error) {
+        alert(`Error: ${error.response?.data?.error || error.message}`);
+    }
+});
 
 
         // CUSTOM DETECTION CODE
@@ -553,6 +654,25 @@ async function detectFinetuned() {
                 alert('Detection failed: ' + (error.response?.data?.error || error.message));
             }
         });
+
+        function updateDetectedDiameter() {
+        if (state.annotations.length === 0) {
+            document.getElementById('cell-diameter-display').textContent = '0';
+            return;
+        }
+
+        // Calculate average of all annotation dimensions
+        let total = 0;
+        state.annotations.forEach(ann => {
+            total += Math.sqrt(ann.width ** 2 + ann.height ** 2); //diagonal calculation
+        });
+        const avgDiameter = Math.round(total / state.annotations.length);
+        
+        document.getElementById('cell-diameter-display').textContent = avgDiameter;
+        
+        // Update the diameter input with the detected value
+        document.getElementById('cell-diameter').value = avgDiameter;
+    }
 
         // NEW: Coordinate sanitization utility
         function sanitizeBox(x1, y1, x2, y2) {
@@ -716,6 +836,7 @@ async function detectFinetuned() {
         state.annotations = mergeOverlappingBoxes(rawAnnotations, overlap_factor, true);
         const finalCount = state.annotations.length;
         updateCellCounts(finalCount);
+        updateDetectedDiameter();
         redraw();
         alert(`Detected ${importedCount} objects, merged to ${state.annotations.length} after processing!`);
 
@@ -830,6 +951,7 @@ async function detectFinetuned() {
         state.annotations = mergeOverlappingBoxes(rawAnnotations, overlap_factor, false);
         const finalCount = state.annotations.length;
         updateCellCounts(finalCount);
+        updateDetectedDiameter();
         redraw();
         alert(`Detected ${importedCount} objects, merged to ${state.annotations.length} after processing!`);
 
@@ -975,11 +1097,11 @@ async function handleImageUpload(e) {
             // Draw annotations
             state.annotations.forEach(ann => {
                 // Fill with semi-transparent color
-                ctx.fillStyle = hexToRGBA(COLORS[ann.class], 0.1); // 20% opacity
+                ctx.fillStyle = hexToRGBA(getClassColor(ann.class), 0.1); // 20% opacity
                 ctx.fillRect(ann.x, ann.y, ann.width, ann.height);
                 
                 // Stroke the border
-                ctx.strokeStyle = COLORS[ann.class];
+                ctx.strokeStyle = getClassColor(ann.class);
                 ctx.lineWidth = 2 / state.scale;
                 if (ann.isDetected) {
                     ctx.setLineDash([5 / state.scale, 5 / state.scale]);
@@ -989,17 +1111,22 @@ async function handleImageUpload(e) {
                 ctx.strokeRect(ann.x, ann.y, ann.width, ann.height);
             });
 
-                        // Draw temporary shapes only if action has started
-                        if ((state.isDrawing || (state.isCropping && state.isCropStarted))) {
+            // Draw temporary shapes only if action has started
+            if ((state.isDrawing || (state.isCropping && state.isCropStarted))) {
                 const current = getTransformedPoint(lastX, lastY);
-                ctx.strokeStyle = state.isCropping ? 'blue' : COLORS[state.currentClass];
+                
+                // Use getClassColor() for both stroke and fill
+                ctx.strokeStyle = state.isCropping ? 'blue' : getClassColor(state.currentClass);
                 
                 // Set fill style based on context
                 if (state.isCropping) {
-                    ctx.fillStyle = 'rgba(0, 0, 255, 0.1)'; // Light blue for crop
+                    ctx.fillStyle = 'rgba(0, 0, 255, 0.1)';
                 } else {
-                    ctx.fillStyle = hexToRGBA(COLORS[state.currentClass], 0.3); // Class color
+                    ctx.fillStyle = hexToRGBA(getClassColor(state.currentClass), 0.3);
                 }
+                
+                // Save and restore context to prevent style bleeding
+                ctx.save();
                 
                 // Draw fill
                 ctx.fillRect(
@@ -1017,6 +1144,8 @@ async function handleImageUpload(e) {
                     Math.abs(current.x - startX),
                     Math.abs(current.y - startY)
                 );
+                
+                ctx.restore();
             }
             }
 
@@ -1237,11 +1366,11 @@ async function handleImageUpload(e) {
     // Draw annotations with both fill and stroke
     state.annotations.forEach(ann => {
         // Draw semi-transparent fill
-        tempCtx.fillStyle = hexToRGBA(COLORS[ann.class], 0.3);
+        tempCtx.fillStyle = hexToRGBA(getClassColor(ann.class), 0.3);
         tempCtx.fillRect(ann.x, ann.y, ann.width, ann.height);
 
         // Draw border with appropriate style
-        tempCtx.strokeStyle = COLORS[ann.class];
+        tempCtx.strokeStyle = getClassColor(ann.class);
         tempCtx.lineWidth = 2;
         if (ann.isDetected) {
             tempCtx.setLineDash([5, 5]);  // Dashed line for detected annotations
@@ -1463,6 +1592,51 @@ document.getElementById('fine-tune-btn').addEventListener('click', () => {
     <div style="display: flex; gap: 10px;">
         <button class="btn" id="run-custom-detect" style="flex: 1;">Detect</button>
         <button class="btn" onclick="document.getElementById('custom-detect-modal').style.display = 'none'" style="flex: 1; background: #666;">Close</button>
+    </div>
+</div>
+<!-- Batch Modal -->
+<div id="batch-modal" style="
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 0 20px rgba(0,0,0,0.2);
+    z-index: 1000;
+    min-width: 400px;
+">
+    <h3 style="margin-top: 0; color: #333;">Batch Processing</h3>
+    <input type="file" id="batch-files" multiple accept=".tiff,.tif" hidden>
+    <button class="btn" onclick="document.getElementById('batch-files').click()" 
+            style="margin-bottom: 15px;">
+        Select Images
+    </button>
+    <div id="file-count" style="margin-bottom: 15px; color: #666;">0 files selected</div>
+    
+    <select id="detection-type" class="btn" style="margin-bottom: 15px;">
+        <option value="SGN">Detect SGN</option>
+        <option value="MADM">Detect MADM</option>
+        <option value="custom">Custom Model</option>
+    </select>
+    
+    <div id="custom-model-ui" style="display: none; margin-bottom: 15px;">
+        <input type="file" id="custom-model" accept=".h5" hidden>
+        <button class="btn" onclick="document.getElementById('custom-model').click()">
+            Upload Model (.h5)
+        </button>
+    </div>
+    
+    <input type="number" id="batch-threshold" value="0.5" step="0.1" min="0" max="1" 
+           class="btn" style="margin-bottom: 15px; width: 100%;">
+    
+    <div style="display: flex; gap: 10px;">
+        <button class="btn" id="start-batch" 
+                style="flex: 1; background: #4CAF50;">Process</button>
+        <button class="btn" onclick="document.getElementById('batch-modal').style.display = 'none'" 
+                style="flex: 1; background: #f44336;">Cancel</button>
     </div>
 </div>
 </body>
