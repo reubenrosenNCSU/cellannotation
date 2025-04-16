@@ -367,7 +367,7 @@ def save_training_data():
 def clear_training_data():
     user_id = session['user_id']
     saved_data_dir = os.path.join('users', user_id, 'saved_data')
-    saved_annotations_dir = os.path.join('users', user_id, 'saved_data')
+    saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
     try:
         # Clear saved data
         data_folder = saved_data_dir
@@ -883,6 +883,128 @@ def detect_finetuned():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def batch_process_image(user_id, image_path, detection_type, threshold, model_path=None):
+    """Process single image using existing pipeline"""
+    try:
+        # Get user directories
+        upload_dir = os.path.join('users', user_id, 'uploads')
+        input_dir = os.path.join('users', user_id, 'input')
+        images_dir = os.path.join('users', user_id, 'images')
+        output_dir = os.path.join('users', user_id, 'output')
+        final_dir = os.path.join('users', user_id, 'finaloutput')
+
+        # Clear directories before processing
+        for dir_path in [upload_dir, input_dir, images_dir, output_dir, final_dir]:
+            clear_folder(dir_path)
+            os.makedirs(dir_path, exist_ok=True)
+
+        # Copy image to uploads
+        shutil.copy(image_path, os.path.join(upload_dir, os.path.basename(image_path)))
+
+
+        if detection_type == 'SGN':
+            scripts = [
+                ['python3', 'scripts/8to16bit.py', upload_dir, input_dir],
+                ['python3', 'scripts/splitimage.py', input_dir, images_dir],
+                ['python3', 'scripts/detection_SGN.py', images_dir, output_dir, str(threshold)],
+                ['python3', 'scripts/mergecsv.py', os.path.join(output_dir, 'output_csv'), 
+                 os.path.join(final_dir, 'annotations.csv')]
+            ]
+        elif detection_type == 'MADM':
+            scripts = [
+                ['python3', 'scripts/8to16bit.py', upload_dir, input_dir],
+                ['python3', 'scripts/splitimage.py', input_dir, images_dir],
+                ['python3', 'scripts/detection.py', images_dir, output_dir, str(threshold)],
+                ['python3', 'scripts/mergecsv.py', os.path.join(output_dir, 'output_csv'),
+                 os.path.join(final_dir, 'annotations.csv')]
+            ]
+        else:  # Custom
+            scripts = [
+                ['python3', 'scripts/custom_detection.py',
+                 os.path.join(upload_dir, os.path.basename(image_path)),
+                 model_path,
+                 final_dir]
+            ]
+
+        # Execute scripts
+        for script in scripts:
+            result = subprocess.run(script, capture_output=True, text=True)
+            if result.returncode != 0:
+                return {'success': False, 'error': result.stderr}
+
+        # Read results
+        csv_path = os.path.join(final_dir, 'annotations.csv')
+        with open(csv_path, 'r') as f:
+            return {'success': True, 'csv': f.read(), 'filename': os.path.basename(image_path)}
+
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+@app.route('/batch-detect', methods=['POST'])
+def batch_detect():
+    user_id = session['user_id']
+    try:
+        # Create batch directory
+        batch_dir = os.path.join('users', user_id, 'batch_temp')
+        os.makedirs(batch_dir, exist_ok=True)
+        clear_folder(batch_dir)  # Clear previous temp files
+
+        # Save uploaded files
+        for file in request.files.getlist('images'):
+            file.save(os.path.join(batch_dir, secure_filename(file.filename)))
+
+        # Get parameters
+        detection_type = request.form['detection_type']
+        threshold = float(request.form.get('threshold', 0.5))
+        custom_model = request.files.get('custom_model')
+
+        # Handle custom model
+        model_path = None
+        if detection_type == 'custom' and custom_model:
+            model_path = os.path.join(batch_dir, 'custom_model.h5')
+            custom_model.save(model_path)
+
+        # Process each image
+        results = []
+        for filename in os.listdir(batch_dir):
+            file_path = os.path.join(batch_dir, filename)
+            if os.path.isfile(file_path) and filename.lower().endswith(('.tiff', '.tif')):
+                result = batch_process_image(
+                    user_id=user_id,
+                    image_path=file_path,
+                    detection_type=detection_type,
+                    threshold=threshold,
+                    model_path=model_path
+                )
+                if result['success']:
+                    results.append({
+                        'csv': result['csv'],
+                        'image': filename,
+                        'csv_name': f"{os.path.splitext(filename)[0]}_annotations.csv"
+                    })
+
+        # Create ZIP
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for result in results:
+                # Add CSV
+                zipf.writestr(result['csv_name'], result['csv'])
+                # Add original image
+                zipf.write(os.path.join(batch_dir, result['image']), result['image'])
+
+        # Cleanup
+        shutil.rmtree(batch_dir, ignore_errors=True)
+        zip_buffer.seek(0)
+
+        return send_file(
+            zip_buffer,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name='batch_results.zip'
+        )
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 def delete_expired_sessions():
     now = datetime.datetime.utcnow()  # Use UTC time
