@@ -226,6 +226,9 @@ input[type="number"]::-webkit-outer-spin-button {
         <div class="cell-count">
             Detected Cell Diameter: <span id="cell-diameter-display">0</span> px
         </div>
+        <div class="cell-count">
+            Last Annotated Diameter: <span id="last-annotated-diameter">0</span> px
+        </div>
         <div class="slider-container">
             <label>Detection Threshold:</label>
             <div class="threshold-input-group">
@@ -398,6 +401,7 @@ input[type="number"]::-webkit-outer-spin-button {
         
         state.annotations = [];
         localStorage.removeItem('annotations'); // Clear any saved annotations
+        document.getElementById('last-annotated-diameter').textContent = '0';
         updateCellCounts(0);
         redraw();
     }
@@ -420,6 +424,25 @@ input[type="number"]::-webkit-outer-spin-button {
             redraw();
         }
         document.getElementById('scale-btn').addEventListener('click', scaleImage);
+
+//annotated cell diameter function
+function updateLastAnnotationDiameter() {
+    if (state.annotations.length === 0) {
+        document.getElementById('last-annotated-diameter').textContent = '0';
+        return;
+    }
+    
+    // Get last annotation
+    const lastAnn = state.annotations[state.annotations.length - 1];
+    // Calculate diagonal as diameter approximation
+    const diameter = Math.round(Math.sqrt(lastAnn.width ** 2 + lastAnn.height ** 2));
+    document.getElementById('last-annotated-diameter').textContent = diameter;
+}
+
+
+
+
+
 
 // Add scaling function
 async function scaleImage() {
@@ -1218,6 +1241,7 @@ async function handleImageUpload(e) {
                     class: state.currentClass
                 });
                 updateCellCounts();
+                updateLastAnnotationDiameter();
                 state.isDrawing = false;
             }
             
