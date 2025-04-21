@@ -788,32 +788,40 @@ def scale_image():
         diameter = float(request.form['diameter'])
         original_filename = request.form['original_filename']
         
-        # Check if scaling needed
         if abs(diameter - 34) / 34 <= 0.25:
             return jsonify({'message': 'No scaling required'}), 200
             
         scaling_factor = 34.0 / diameter
 
-        # Get CURRENT image path (from UPLOAD_FOLDER, not original)
         current_path = os.path.join(upload_dir, original_filename)
         if not os.path.exists(current_path):
             return jsonify({'error': 'Current image not found'}), 400
 
-        # Resize and save
         with Image.open(current_path) as img:
             new_width = int(img.width * scaling_factor)
             new_height = int(img.height * scaling_factor)
             resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
             
-            # Save scaled version to uploads (overwrite current)
             upload_path = os.path.join(upload_dir, original_filename)
             resized_img.save(upload_path, format='TIFF', compression='tiff_deflate')
             
-            # Generate new preview
+            # ADD NORMALIZATION FOR 16-BIT IMAGES HERE
+            if resized_img.mode == 'I;16':
+                img_array = np.array(resized_img).astype(np.uint16)
+                min_val = np.min(img_array)
+                max_val = np.max(img_array)
+                if max_val > min_val:
+                    normalized = ((img_array - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+                else:
+                    normalized = (img_array // 256).astype(np.uint8)
+                preview_img = Image.fromarray(normalized)
+            else:
+                preview_img = resized_img
+            
             unique_id = str(uuid.uuid4())
             output_filename = f"{unique_id}.png"
             output_path = os.path.join(converted_dir, output_filename)
-            resized_img.save(output_path, "PNG")
+            preview_img.save(output_path, "PNG")  # Save normalized image
 
             return jsonify({
                 'converted_url': f'/converted/{output_filename}',
