@@ -891,7 +891,7 @@ def detect_finetuned():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-def batch_process_image(user_id, image_path, detection_type, threshold, model_path=None):
+def batch_process_image(user_id, image_path, detection_type, threshold, model_path=None,class_type='SGN'):
     """Process single image using existing pipeline"""
     try:
         # Get user directories
@@ -927,11 +927,18 @@ def batch_process_image(user_id, image_path, detection_type, threshold, model_pa
                  os.path.join(final_dir, 'annotations.csv')]
             ]
         else:  # Custom
+            # Determine which script to use based on class type
+            if class_type == 'SGN':
+                script_name = 'scripts/batch_SGN_custom.py'
+            else:
+                script_name = 'scripts/batch_MADM_custom.py'
+                
             scripts = [
-                ['python3', 'scripts/custom_detection.py',
-                 os.path.join(upload_dir, os.path.basename(image_path)),
-                 model_path,
-                 final_dir]
+                ['python3', 'scripts/8to16bit.py', upload_dir, input_dir],
+                ['python3', 'scripts/splitimage.py', input_dir, images_dir],
+                ['python3', script_name, images_dir, output_dir, str(threshold), model_path],
+                ['python3', 'scripts/mergecsv.py', os.path.join(output_dir, 'output_csv'), 
+                os.path.join(final_dir, 'annotations.csv')]
             ]
 
         # Execute scripts
@@ -965,6 +972,7 @@ def batch_detect():
         detection_type = request.form['detection_type']
         threshold = float(request.form.get('threshold', 0.5))
         custom_model = request.files.get('custom_model')
+        class_type = request.form.get('class_type', 'SGN')
 
         # Handle custom model
         model_path = None
@@ -982,7 +990,8 @@ def batch_detect():
                     image_path=file_path,
                     detection_type=detection_type,
                     threshold=threshold,
-                    model_path=model_path
+                    model_path=model_path,
+                    class_type=class_type
                 )
                 if result['success']:
                     results.append({
