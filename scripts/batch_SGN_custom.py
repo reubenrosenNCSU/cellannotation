@@ -128,8 +128,7 @@ def stitchDetection(detections, H, W, xsize=512, ysize=512, step=448):
 
 
 # %% Main code
-def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT = '/home/greenbaumgpu/Reuben/js_annotation/output',  tHRESHOLD = 0.5
-):
+def main(pATHTEST = './images',pATHRESULT = './output',  tHRESHOLD = 0.5, model_path = './snapshots/SGN_Rene.h5'):
     
     testnames, testpaths = listFile(pATHTEST, '.tif')
 
@@ -143,7 +142,6 @@ def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT 
     num_class = len(classes)
     pATHCSV = os.path.join(pATHRESULT, 'output_csv')  # ✅
 
-    model_path = os.path.join('snapshots', 'SGN_Rene.h5')
 
     # load retinanet model
     model = models.load_model(model_path, backbone_name='resnet50')
@@ -276,7 +274,12 @@ def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT 
                 cv2.imwrite(output_image_path, cv2.cvtColor(fulldraw.astype('uint8'), cv2.COLOR_RGB2GRAY))
 
 if __name__ == "__main__":
+    if len(sys.argv) != 5:
+        print("Usage: python batch_SGN_custom.py <input_dir> <output_dir> <threshold> <model_path>")
+        sys.exit(1)
+        
     pATHTEST = sys.argv[1]
     pATHRESULT = sys.argv[2]
-    tHRESHOLD = float(sys.argv[3])  # Ensure this line exists
-    main(pATHTEST, pATHRESULT, tHRESHOLD)
+    tHRESHOLD = float(sys.argv[3])
+    MODEL_PATH = sys.argv[4]  # New model parameter
+    main(pATHTEST, pATHRESULT, tHRESHOLD, MODEL_PATH)

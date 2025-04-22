@@ -1,22 +1,14 @@
 #!/usr/bin/env python
 # coding: utf-8
-import sys
-import os
 
-# 1. Prioritize your local directory FIRST
-sys.path.insert(0, "/home/greenbaumgpu/Reuben/js_annotation")
-
-# 2. Import your modified utils/image.py BEFORE other keras_retinanet modules
-from keras_retinanet.utils.image import  read_image_bgr, preprocess_image, resize_image
 import keras
 import sys
 import matplotlib.pyplot as plt
 from keras_retinanet import models
+from keras_retinanet.utils.image import read_image_bgr, preprocess_image, resize_image
 from keras_retinanet.utils.visualization import draw_box, draw_caption
 from keras_retinanet.utils.colors import label_color
 from keras_retinanet.utils.gpu import setup_gpu
-
-
 
 import cv2
 import csv
@@ -25,8 +17,6 @@ import numpy as np
 from scipy.io import loadmat
 
 # %% Functions
-
-
 
 def listFile(path, ext):
     '''    
@@ -128,30 +118,31 @@ def stitchDetection(detections, H, W, xsize=512, ysize=512, step=448):
 
 
 # %% Main code
-def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT = '/home/greenbaumgpu/Reuben/js_annotation/output',  tHRESHOLD = 0.5
-):
-    
+def main(pATHTEST = './images',pATHRESULT = './output',  tHRESHOLD = 0.5, model_path='./snapshots/MADMweights.h5'):
+
     testnames, testpaths = listFile(pATHTEST, '.tif')
 
     # Labels for detection
-    labels_to_names = {0: 'SGN'}
+    labels_to_names = {0: 'uncertain', 1: 'yellow neuron', 2: 'yellow astrocyte', 
+                        3: 'green neuron', 4: 'green astrocyte', 5: 'red neuron', 
+                        6: 'red astrocyte'}
+
     xsize = 512
     ysize = 512
     step = 448  # initial step size, can be adjusted dynamically based on image size
 
     classes = list(labels_to_names.values())
     num_class = len(classes)
-    pATHCSV = os.path.join(pATHRESULT, 'output_csv')  # ✅
+    pATHCSV = os.path.join(pATHRESULT, 'output_csv')
 
-    model_path = os.path.join('snapshots', 'SGN_Rene.h5')
 
     # load retinanet model
     model = models.load_model(model_path, backbone_name='resnet50')
     model = models.convert_model(model)  # Convert to inference model
 
+    #define variables
     all_detections = [[None for i in range(num_class)] for j in range(len(testnames))]
     clean_detections = [[None for i in range(num_class)] for j in range(len(testnames))]
-    CSV = os.path.join(pATHRESULT, pATHCSV + '_result.csv')
 
 
     # %% Processing images and detecting
@@ -273,10 +264,15 @@ def main(pATHTEST = '/home/greenbaumgpu/Reuben/js_annotation/images',pATHRESULT 
                             
                             #save the image
                 output_image_path = os.path.join(pATHRESULT, testnames[i] + '_detected.png')
-                cv2.imwrite(output_image_path, cv2.cvtColor(fulldraw.astype('uint8'), cv2.COLOR_RGB2GRAY))
+                cv2.imwrite(output_image_path, fulldraw)
 
 if __name__ == "__main__":
+    if len(sys.argv) != 5:
+        print("Usage: python detection_MADM_custom.py <input_dir> <output_dir> <threshold> <model_path>")
+        sys.exit(1)
+        
     pATHTEST = sys.argv[1]
     pATHRESULT = sys.argv[2]
-    tHRESHOLD = float(sys.argv[3])  # Ensure this line exists
-    main(pATHTEST, pATHRESULT, tHRESHOLD)
+    tHRESHOLD = float(sys.argv[3])
+    MODEL_PATH = sys.argv[4]  # New model parameter
+    main(pATHTEST, pATHRESULT, tHRESHOLD, MODEL_PATH)
