@@ -118,6 +118,7 @@ def upload_file():
         original_extension = os.path.splitext(original_name)[1][1:].lower()
         user_upload_dir = os.path.join('users', user_id, 'uploads')
         user_converted_dir = os.path.join('users', user_id, 'converted')
+        
 
         # Read image and ensure RGB (3 channels)
         with Image.open(file.stream) as img:
@@ -132,6 +133,10 @@ def upload_file():
             # Save processed RGB copy to working uploads
             upload_path = os.path.join(user_upload_dir, original_name)
             img.save(upload_path, format='TIFF', compression='tiff_deflate')
+        
+        # Store original dimensions in session
+        session['original_width'] = img.width
+        session['original_height'] = img.height
 
         # Generate preview (must be inside the try block)
         unique_id = str(uuid.uuid4())
@@ -787,23 +792,42 @@ def scale_image():
     try:
         diameter = float(request.form['diameter'])
         original_filename = request.form['original_filename']
-        
-        if abs(diameter - 34) / 34 <= 0.25:
-            return jsonify({'message': 'No scaling required'}), 200
-            
-        scaling_factor = 34.0 / diameter
-
         current_path = os.path.join(upload_dir, original_filename)
-        if not os.path.exists(current_path):
-            return jsonify({'error': 'Current image not found'}), 400
 
-        with Image.open(current_path) as img:
-            new_width = int(img.width * scaling_factor)
-            new_height = int(img.height * scaling_factor)
-            resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        # Get original dimensions from session
+        orig_width = session.get('original_width')
+        orig_height = session.get('original_height')
+        if not orig_width or not orig_height:
+            return jsonify({'error': 'Original dimensions missing'}), 400
+
+        # Handle reset to original dimensions first
+        if diameter == 34:
+            # Get path to original preserved file
+            original_preserve_path = os.path.join(upload_dir, original_filename)
             
-            upload_path = os.path.join(upload_dir, original_filename)
-            resized_img.save(upload_path, format='TIFF', compression='tiff_deflate')
+            # Recalculate scaling factor as 1.0
+            scaling_factor = 1.0
+            new_width = orig_width
+            new_height = orig_height
+            
+            # Reset scaling state
+            session['is_scaled'] = False
+        else:
+            # Calculate scaling factor
+            scaling_factor = 34.0 / diameter
+            
+            # Apply 25% threshold only if not already scaled
+            if not session.get('is_scaled', False) and abs(diameter - 34)/34 <= 0.25:
+                return jsonify({'message': 'No scaling required'}), 200
+
+            new_width = int(orig_width * scaling_factor)
+            new_height = int(orig_height * scaling_factor)
+            session['is_scaled'] = True
+
+        # Resize and save
+        with Image.open(current_path) as img:
+            resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            resized_img.save(current_path, format='TIFF', compression='tiff_deflate')
             
             # ADD NORMALIZATION FOR 16-BIT IMAGES HERE
             if resized_img.mode == 'I;16':
