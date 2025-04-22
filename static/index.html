@@ -576,6 +576,8 @@ document.getElementById('start-batch').addEventListener('click', async () => {
         const model = document.getElementById('custom-model').files[0];
         if (!model) return alert('Please select a model!');
         formData.append('custom_model', model);
+        formData.append('class_type', 
+        document.getElementById('custom-class-type').value);
     }
     
     try {
@@ -1651,6 +1653,14 @@ document.getElementById('fine-tune-btn').addEventListener('click', () => {
         <button class="btn" onclick="document.getElementById('custom-model').click()">
             Upload Model (.h5)
         </button>
+    <!-- Add class type selection -->
+    <div style="margin-top: 10px;">
+        <label>Model Type:</label>
+        <select id="custom-class-type" class="btn" style="width: 100%; margin-top: 5px;">
+            <option value="SGN">SGN Class</option>
+            <option value="MADM">MADM Class</option>
+        </select>
+    </div>
     </div>
     
     <input type="number" id="batch-threshold" value="0.5" step="0.1" min="0" max="1" 
