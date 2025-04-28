@@ -134,9 +134,6 @@ def upload_file():
             upload_path = os.path.join(user_upload_dir, original_name)
             img.save(upload_path, format='TIFF', compression='tiff_deflate')
         
-        # Store original dimensions in session
-        session['original_width'] = img.width
-        session['original_height'] = img.height
 
         # Generate preview (must be inside the try block)
         unique_id = str(uuid.uuid4())
@@ -792,42 +789,23 @@ def scale_image():
     try:
         diameter = float(request.form['diameter'])
         original_filename = request.form['original_filename']
+        
+        if abs(diameter - 34) / 34 <= 0.25:
+            return jsonify({'message': 'No scaling required'}), 200
+            
+        scaling_factor = 34.0 / diameter
+
         current_path = os.path.join(upload_dir, original_filename)
+        if not os.path.exists(current_path):
+            return jsonify({'error': 'Current image not found'}), 400
 
-        # Get original dimensions from session
-        orig_width = session.get('original_width')
-        orig_height = session.get('original_height')
-        if not orig_width or not orig_height:
-            return jsonify({'error': 'Original dimensions missing'}), 400
-
-        # Handle reset to original dimensions first
-        if diameter == 34:
-            # Get path to original preserved file
-            original_preserve_path = os.path.join(upload_dir, original_filename)
-            
-            # Recalculate scaling factor as 1.0
-            scaling_factor = 1.0
-            new_width = orig_width
-            new_height = orig_height
-            
-            # Reset scaling state
-            session['is_scaled'] = False
-        else:
-            # Calculate scaling factor
-            scaling_factor = 34.0 / diameter
-            
-            # Apply 25% threshold only if not already scaled
-            if not session.get('is_scaled', False) and abs(diameter - 34)/34 <= 0.25:
-                return jsonify({'message': 'No scaling required'}), 200
-
-            new_width = int(orig_width * scaling_factor)
-            new_height = int(orig_height * scaling_factor)
-            session['is_scaled'] = True
-
-        # Resize and save
         with Image.open(current_path) as img:
+            new_width = int(img.width * scaling_factor)
+            new_height = int(img.height * scaling_factor)
             resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            resized_img.save(current_path, format='TIFF', compression='tiff_deflate')
+            
+            upload_path = os.path.join(upload_dir, original_filename)
+            resized_img.save(upload_path, format='TIFF', compression='tiff_deflate')
             
             # ADD NORMALIZATION FOR 16-BIT IMAGES HERE
             if resized_img.mode == 'I;16':
@@ -866,6 +844,8 @@ def detect_finetuned():
             os.path.join('users', user_id, 'images')
         ]
     try:
+        # Get model type from request
+        model_type = request.form.get('model_type', 'SGN')  # Default to SGN
         # 1. Get the copied model
         user_snapshot_dir = os.path.join('users', user_id, 'snapshots')
         model_path = os.path.join(user_snapshot_dir, 'last_used.h5')  # ✅ User's model
@@ -886,15 +866,16 @@ def detect_finetuned():
         # 4. Use same CSV path as custom detection
         csv_filename = f"{os.path.basename(image_path)}_result.csv"
         csv_path = os.path.join(output_csv_dir, csv_filename)
+        detection_script = 'scripts/custom_detection_color.py' if model_type == 'MADM' else 'scripts/custom_detection.py'
 
-        # 5. Run detection script
         subprocess.run([
             'python3',
-            'scripts/custom_detection.py',
+            detection_script,
             image_path,
             model_path,
             output_dir
         ], check=True)
+
 
 
 
@@ -915,7 +896,7 @@ def detect_finetuned():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-def batch_process_image(user_id, image_path, detection_type, threshold, model_path=None,class_type='SGN'):
+def batch_process_image(user_id, image_path, detection_type, threshold, model_path=None,class_type='SGN', cell_diameter=34):
     """Process single image using existing pipeline"""
     try:
         # Get user directories
@@ -932,6 +913,14 @@ def batch_process_image(user_id, image_path, detection_type, threshold, model_pa
 
         # Copy image to uploads
         shutil.copy(image_path, os.path.join(upload_dir, os.path.basename(image_path)))
+
+        # Scale image
+        with Image.open(image_path) as img:
+            scaling_factor = 34.0 / cell_diameter
+            new_width = int(img.width * scaling_factor)
+            new_height = int(img.height * scaling_factor)
+            scaled_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            scaled_img.save(image_path, format='TIFF', compression='tiff_deflate')
 
 
         if detection_type == 'SGN':
@@ -997,6 +986,7 @@ def batch_detect():
         threshold = float(request.form.get('threshold', 0.5))
         custom_model = request.files.get('custom_model')
         class_type = request.form.get('class_type', 'SGN')
+        cell_diameter = float(request.form.get('cell_diameter', 34))
 
         # Handle custom model
         model_path = None
@@ -1015,7 +1005,8 @@ def batch_detect():
                     detection_type=detection_type,
                     threshold=threshold,
                     model_path=model_path,
-                    class_type=class_type
+                    class_type=class_type,
+                    cell_diameter=cell_diameter
                 )
                 if result['success']:
                     results.append({
@@ -1055,14 +1046,14 @@ def delete_expired_sessions():
         if os.path.isdir(user_path):
             try:
                 mod_time = datetime.datetime.utcfromtimestamp(os.path.getmtime(user_path))
-                if (now - mod_time).total_seconds() > 3600:
+                if (now - mod_time).total_seconds() > 86400:
                     shutil.rmtree(user_path)
                     print(f"Cleaned expired session: {user_id}")
             except Exception as e:
                 print(f"Error cleaning {user_id}: {str(e)}")
 # Initialize scheduler
 scheduler = BackgroundScheduler()
-scheduler.add_job(func=delete_expired_sessions, trigger="interval", hours=1)
+scheduler.add_job(func=delete_expired_sessions, trigger="interval", hours=24)
 scheduler.start()
 
 # Shut down the scheduler when exiting the app
