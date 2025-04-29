@@ -798,25 +798,16 @@ def scale_image():
     try:
         diameter = float(request.form['diameter'])
         original_filename = request.form['original_filename']
-            
-        # Default reference diameter
-        reference_diameter = 34.0
-        tolerance = 0.25 * reference_diameter  # 25% of 34 = 8.5
+        
+        if 'target_diameter' not in session:
+            session['target_diameter'] = 34.0  # Default
 
-        # If within ±25% of 34.0, and user is entering a value within same range
-        if abs(diameter - reference_diameter) <= tolerance:
-            # Also check if previously scaled image was within that range
-            # We'll compare it to the session's stored target_diameter if it exists
-            current_diameter = session.get('target_diameter', reference_diameter)
-            if abs(current_diameter - reference_diameter) <= tolerance:
-                return jsonify({'message': 'Scaling not required'})
-
-        # Use previous or default target diameter
-        target_diameter = session.get('target_diameter', reference_diameter)
+        target_diameter = session['target_diameter']
         scaling_factor = target_diameter / diameter
 
-        # Store the new diameter as the updated target
+        # Save the *new* target diameter for next time
         session['target_diameter'] = diameter
+
 
         current_path = os.path.join(upload_dir, original_filename)
         if not os.path.exists(current_path):
