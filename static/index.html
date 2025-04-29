@@ -92,6 +92,21 @@
     border-radius: 4px;
     font-weight: bold;
 }
+.model-group {
+    border: 2px solid #4CAF50;
+    border-radius: 6px;
+    padding: 10px;
+    margin: 10px 0;
+    background: #f8fff8;
+}
+
+.model-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+    color: #666;
+    font-weight: bold;
+}
 
 canvas {
     cursor: crosshair;
@@ -163,6 +178,26 @@ input[type="number"]::-webkit-outer-spin-button {
     border-radius: 4px;
     cursor: pointer;
 }
+#color-picker-dropdown {
+        position: absolute;
+        left: 15px;
+        top: 40px;
+        background: #f4f4f4;
+        padding: 15px;
+        border-radius: 6px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        z-index: 1000;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    
+    .color-picker {
+        margin: 5px 0;
+    }
+    
+    #color-toggle-btn.active {
+        background: #2196F3;
+    }
     </style>
 </head>
 <body>
@@ -185,8 +220,10 @@ input[type="number"]::-webkit-outer-spin-button {
                 <option value="6">red astrocyte</option>
             </select>
         </div>
-        <div class="color-pickers">
-            <h4>Class Colors</h4>
+        <button class="btn tooltip" id="color-toggle-btn" data-tooltip="Toggle class color pickers">
+            Class Colors
+        </button>
+        <div id="color-picker-dropdown" style="display: none;">
             <div id="color-picker-container"></div>
         </div>
 
@@ -253,8 +290,18 @@ input[type="number"]::-webkit-outer-spin-button {
         <button class="btn tooltip" data-tooltip="Save data for retraining" id="save-training-data-btn">Save Training Data</button>
         <button class="btn tooltip" data-tooltip="Upload data to retrain" id="fine-tune-btn">Fine-tune (Custom)</button>
         <button class="btn tooltip" data-tooltip="Retrain on saved data" id="fine-tune-saved-btn">Fine-tune (Saved Data)</button>
-        <button class="btn tooltip" 
-        data-tooltip="Use latest trained model" id="detect-finetuned-btn">Detect with Fine-tuned Model</button>
+        <div class="model-group">
+            <label>Select Model Type:</label>
+            <select id="model-type-select" class="btn">
+                <option value="SGN">SGN Model</option>
+                <option value="MADM">MADM Model</option>
+            </select>
+            <button class="btn tooltip" 
+                    data-tooltip="Use latest trained model" 
+                    id="detect-finetuned-btn">
+                Detect with Fine-tuned Model
+            </button>
+        </div>
         <button class="btn tooltip" data-tooltip="Load image and test with a custom model" id="custom-detect-btn">Custom Detect</button>
     </div>
 
@@ -263,6 +310,24 @@ input[type="number"]::-webkit-outer-spin-button {
     </div>
 
     <script>
+
+const colorToggleBtn = document.getElementById('color-toggle-btn');
+    const colorDropdown = document.getElementById('color-picker-dropdown');
+    
+    colorToggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = colorDropdown.style.display === 'block';
+        colorDropdown.style.display = isVisible ? 'none' : 'block';
+        colorToggleBtn.classList.toggle('active', !isVisible);
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!colorDropdown.contains(e.target) && e.target !== colorToggleBtn) {
+            colorDropdown.style.display = 'none';
+            colorToggleBtn.classList.remove('active');
+        }
+    });
         window.addEventListener('beforeunload', function(e) {
             const data = new URLSearchParams();
             data.append('dummy', '1'); // SendBeacon requires content
@@ -284,8 +349,13 @@ input[type="number"]::-webkit-outer-spin-button {
         ];
         const colorContainer = document.getElementById('color-picker-container');
         const DEFAULT_COLORS = [
-            '#CCFF00', '#FFD700', '#FFA500', 
-            '#32CD32', '#006400', '#FF0000', '#8B0000'
+        '#E7FF6D', // SGN
+        '#66CCFF', // yellow neuron
+        '#0033FF', // yellow astrocyte
+        '#7A2222', // green neuron
+        '#FF3B22', // green astrocyte
+        '#FF66FF', // red neuron
+        '#660066'  // red astrocyte
         ];
 
         CLASS_NAMES.forEach((className, index) => {
@@ -499,16 +569,21 @@ document.getElementById('detect-finetuned-btn').addEventListener('click', detect
 
 async function detectFinetuned() {
     try {
-        // 1. Call backend
-        const response = await axios.post('/detect-finetuned', {},{
-            withCredentials: true
-        });
+        // Get selected model type from dropdown
+        const modelType = document.getElementById('model-type-select').value;
+
+        // Call backend with model type
+        const response = await axios.post('/detect-finetuned', 
+            { model_type: modelType },  // Send model type to backend
+            { withCredentials: true }
+        );
 
         state.annotations = []; // clear annotations before processing
         
         // 2. Process CSV data (SAME AS CUSTOM DETECTION)
         const csvData = response.data.annotations;
         const lines = csvData.split('\n');
+        
         
         lines.forEach(line => {
             if (!line.trim()) return;
@@ -569,6 +644,7 @@ document.getElementById('start-batch').addEventListener('click', async () => {
     const formData = new FormData();
     formData.append('detection_type', document.getElementById('detection-type').value);
     formData.append('threshold', document.getElementById('batch-threshold').value);
+    formData.append('cell_diameter', document.getElementById('batch-cell-diameter').value);
     
     Array.from(files).forEach(file => formData.append('images', file));
     
@@ -695,8 +771,7 @@ document.getElementById('start-batch').addEventListener('click', async () => {
         
         document.getElementById('cell-diameter-display').textContent = avgDiameter;
         
-        // Update the diameter input with the detected value
-        document.getElementById('cell-diameter').value = avgDiameter;
+
     }
 
         // NEW: Coordinate sanitization utility
@@ -1662,9 +1737,15 @@ document.getElementById('fine-tune-btn').addEventListener('click', () => {
         </select>
     </div>
     </div>
-    
+    <label for="batch-threshold" style="display: block; margin-bottom: 5px;">Detection Threshold (0-1):</label>
     <input type="number" id="batch-threshold" value="0.5" step="0.1" min="0" max="1" 
            class="btn" style="margin-bottom: 15px; width: 100%;">
+    
+    <div style="margin-bottom: 15px;">
+    <label for="batch-cell-diameter" style="display: block; margin-bottom: 5px;">Typical cell diameter in batch(px):</label>
+    <input type="number" id="batch-cell-diameter" class="btn" 
+            value="34" step="1" min="1" style="width: 100%;">
+    </div>
     
     <div style="display: flex; gap: 10px;">
         <button class="btn" id="start-batch" 
