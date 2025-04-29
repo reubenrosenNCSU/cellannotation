@@ -137,6 +137,7 @@ def upload_file():
                # Store original dimensions in session
         session['original_dimensions'] = (original_width, original_height)
         session['current_dimensions'] = (original_width, original_height)
+        session['target_diameter'] = 34.0  # Reset scaling reference when a new image is uploaded
 
         
 
