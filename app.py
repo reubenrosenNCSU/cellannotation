@@ -125,7 +125,7 @@ def upload_file():
             # Convert RGBA/LA to RGB if needed
             if img.mode in ('RGBA', 'LA'):
                 img = img.convert('RGB')
-            
+            original_width, original_height = img.size
             # Save original to preservation folder
             original_preserve_path = os.path.join(user_upload_dir, original_name)
             img.save(original_preserve_path, format='TIFF', compression='tiff_deflate')
@@ -133,6 +133,11 @@ def upload_file():
             # Save processed RGB copy to working uploads
             upload_path = os.path.join(user_upload_dir, original_name)
             img.save(upload_path, format='TIFF', compression='tiff_deflate')
+
+               # Store original dimensions in session
+        session['original_dimensions'] = (original_width, original_height)
+        session['current_dimensions'] = (original_width, original_height)
+
         
 
         # Generate preview (must be inside the try block)
@@ -223,6 +228,10 @@ def upload_cropped_file():
             
             # Overwrite original file with cropped version
             cropped_img.save(upload_path, format='TIFF', compression='tiff_deflate')
+            # 🔄 Update original and current dimensions to CROPPED size
+            session['original_dimensions'] = cropped_img.size  # (new_width, new_height)
+            session['current_dimensions'] = cropped_img.size
+
 
         # Generate new PNG preview from updated TIFF
         unique_id = str(uuid.uuid4())
@@ -789,11 +798,25 @@ def scale_image():
     try:
         diameter = float(request.form['diameter'])
         original_filename = request.form['original_filename']
-        
-        if abs(diameter - 34) / 34 <= 0.25:
-            return jsonify({'message': 'No scaling required'}), 200
             
-        scaling_factor = 34.0 / diameter
+        # Default reference diameter
+        reference_diameter = 34.0
+        tolerance = 0.25 * reference_diameter  # 25% of 34 = 8.5
+
+        # If within ±25% of 34.0, and user is entering a value within same range
+        if abs(diameter - reference_diameter) <= tolerance:
+            # Also check if previously scaled image was within that range
+            # We'll compare it to the session's stored target_diameter if it exists
+            current_diameter = session.get('target_diameter', reference_diameter)
+            if abs(current_diameter - reference_diameter) <= tolerance:
+                return jsonify({'message': 'Scaling not required'})
+
+        # Use previous or default target diameter
+        target_diameter = session.get('target_diameter', reference_diameter)
+        scaling_factor = target_diameter / diameter
+
+        # Store the new diameter as the updated target
+        session['target_diameter'] = diameter
 
         current_path = os.path.join(upload_dir, original_filename)
         if not os.path.exists(current_path):
