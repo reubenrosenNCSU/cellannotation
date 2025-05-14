@@ -345,14 +345,17 @@ def save_training_data():
     try:
         # Get processing parameters
         original_filename = request.form['original_filename']
+        base_name = os.path.splitext(original_filename)[0]
         
         # Load original image directly without any processing
         original_path = os.path.join(upload_dir, original_filename)
         if not os.path.exists(original_path):
             return jsonify({'error': 'Original image not found'}), 400
 
+        # Generate unique identifier
+        unique_id = str(uuid.uuid4())[:8]  # First 8 chars of UUID
         # Create output filename
-        tiff_filename = original_filename
+        tiff_filename = f"{base_name}_{unique_id}.tiff"
         image_path = os.path.join(saved_data_dir, tiff_filename)
         
         # Convert directly to TIFF without any adjustments
@@ -365,9 +368,15 @@ def save_training_data():
 
         # Save CSV (rest remains the same)
         csv_file = request.files['csv']
+        csv_content = csv_file.read().decode('utf-8')
+        
+        # Replace original filename with new image name in CSV content
+        updated_csv = csv_content.replace(original_filename, tiff_filename)
         csv_filename = f"{uuid.uuid4()}.csv"
         csv_path = os.path.join(csv_data_dir, csv_filename)
-        csv_file.save(csv_path)
+        with open(csv_path, 'w') as f:
+            f.write(updated_csv)
+
 
         return jsonify({'message': 'Training data saved successfully'})
 
@@ -484,7 +493,8 @@ def train_saved_data():
         num_images = int(request.form.get('num_images', 7))
         
         # 1. Copy pre-train images to saved_data
-        pre_train_dir = 'pre_train_SGN'
+        model_type = request.form.get('model_type', 'SGN')
+        pre_train_dir = 'pre_train_MADM' if model_type == 'MADM' else 'pre_train_SGN'
         saved_data_dir = os.path.join('users', user_id, 'saved_data')
 
         # Get sorted list of image files
@@ -860,7 +870,7 @@ def detect_finetuned():
         ]
     try:
         # Get model type from request
-        model_type = request.form.get('model_type', 'SGN')  # Default to SGN
+        model_type = request.json.get('model_type', 'SGN')
         # 1. Get the copied model
         user_snapshot_dir = os.path.join('users', user_id, 'snapshots')
         model_path = os.path.join(user_snapshot_dir, 'last_used.h5')  # ✅ User's model
