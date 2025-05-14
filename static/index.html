@@ -433,6 +433,7 @@ const colorToggleBtn = document.getElementById('color-toggle-btn');
             brightnessMax.addEventListener('change', updateBrightnessRange);
             contrastMin.addEventListener('change', updateContrastRange);
             contrastMax.addEventListener('change', updateContrastRange);
+            document.addEventListener('keydown', handleKeyPress);
 
             // Canvas Events
             canvas.addEventListener('mousedown', handleMouseDown);
@@ -444,6 +445,15 @@ const colorToggleBtn = document.getElementById('color-toggle-btn');
             document.getElementById('fine-tune-saved-btn').addEventListener('click', () => {
             document.getElementById('saved-train-modal').style.display = 'block';
         });
+        function handleKeyPress(e) {
+    if (e.keyCode === 27) { // ESC key
+        if (state.isZoomMode) {
+            state.isZoomMode = false;
+            document.getElementById('zoom-btn').classList.remove('active');
+            redraw();
+        }
+    }
+}
 
         function updateBrightnessRange() {
             let min = parseInt(brightnessMin.value);
@@ -1651,7 +1661,7 @@ document.getElementById('fine-tune-btn').addEventListener('click', () => {
 <div id="saved-train-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; z-index: 1000;">
     <h3>Train with Saved Data</h3>
     <div style="margin: 10px 0;">
-        <label for="num-images">Pre-train Images (0-7):</label>
+        <label for="num-images">Pre-train Images (0-7 for SGN) (0-278 for MADM):</label>
         <input type="number" id="num-images" class="btn" 
                value="7" min="0" max="7" style="width: 100%;">
     </div>
