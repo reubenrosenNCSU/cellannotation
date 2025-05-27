@@ -341,42 +341,65 @@ def save_training_data():
     user_id = session['user_id']
     upload_dir = os.path.join('users', user_id, 'uploads')
     saved_data_dir = os.path.join('users', user_id, 'saved_data')
-    csv_data_dir = os.path.join('users', user_id, 'saved_annotations')
+    saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
+
     try:
-        # Get processing parameters
+        # Get original image and CSV
         original_filename = request.form['original_filename']
-        base_name = os.path.splitext(original_filename)[0]
-        
-        # Load original image directly without any processing
         original_path = os.path.join(upload_dir, original_filename)
-        if not os.path.exists(original_path):
-            return jsonify({'error': 'Original image not found'}), 400
+        csv_content = request.files['csv'].read().decode('utf-8')
 
-        # Generate unique identifier
-        unique_id = str(uuid.uuid4())[:8]  # First 8 chars of UUID
-        # Create output filename
-        tiff_filename = f"{base_name}_{unique_id}.tiff"
-        image_path = os.path.join(saved_data_dir, tiff_filename)
-        
-        # Convert directly to TIFF without any adjustments
         with Image.open(original_path) as img:
-            img.save(
-                image_path,
-                format='TIFF',
-                compression='tiff_deflate'
-            )
+            width, height = img.size
+            unique_id = str(uuid.uuid4())[:8]
 
-        # Save CSV (rest remains the same)
-        csv_file = request.files['csv']
-        csv_content = csv_file.read().decode('utf-8')
-        
-        # Replace original filename with new image name in CSV content
-        updated_csv = csv_content.replace(original_filename, tiff_filename)
-        csv_filename = f"{uuid.uuid4()}.csv"
-        csv_path = os.path.join(csv_data_dir, csv_filename)
-        with open(csv_path, 'w') as f:
-            f.write(updated_csv)
+            # Split into 512x512 tiles
+            for y in range(0, height, 512):
+                for x in range(0, width, 512):
+                    # Create tile filename
+                    tile_filename = f"{unique_id}_{x}_{y}.tiff"
+                    tile_path = os.path.join(saved_data_dir, tile_filename)
+                    
+                    # Crop and save tile
+                    tile = img.crop((x, y, x+512, y+512))
+                    tile.save(tile_path, "TIFF", compression="tiff_deflate")
 
+                    # Filter and transform CSV entries for this tile
+                    tile_csv = []
+                    for line in csv_content.split('\n'):
+                        if not line.strip() or line.startswith('filename'):
+                            tile_csv.append(line)  # Keep header
+                            continue
+                            
+                        parts = line.split(',')
+                        if len(parts) < 6:
+                            continue
+                            
+                        # Extract coordinates from original CSV
+                        orig_name, x1, y1, x2, y2, cls = parts
+                        x1, y1, x2, y2 = map(float, (x1, y1, x2, y2))
+                        
+                        # Check if annotation overlaps with current tile
+                        if (x1 < x+512 and x2 > x and y1 < y+512 and y2 > y):
+                            # Convert to tile-relative coordinates
+                            new_x1 = max(x1 - x, 0)
+                            new_y1 = max(y1 - y, 0)
+                            new_x2 = min(x2 - x, 512)
+                            new_y2 = min(y2 - y, 512)
+                            
+                            # Replace filename and coordinates
+                            new_x1 = int(round(new_x1))
+                            new_y1 = int(round(new_y1))
+                            new_x2 = int(round(new_x2))
+                            new_y2 = int(round(new_y2))
+                            new_line = f"{tile_filename},{new_x1},{new_y1},{new_x2},{new_y2},{cls}"
+                            tile_csv.append(new_line)
+
+                    # Save tile CSV
+                    csv_filename = f"{unique_id}_{x}_{y}.csv"
+                    csv_path = os.path.join(saved_annotations_dir, csv_filename)
+                    with open(csv_path, 'w') as f:
+                        f.write('\n'.join(tile_csv))
 
         return jsonify({'message': 'Training data saved successfully'})
 
