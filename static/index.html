@@ -1510,12 +1510,10 @@ function hexToRGBA(hex, alpha) {
 
             // Image Operations
     async function cropImage(x, y, width, height) {
-    // Convert coordinates considering zoom/pan
-    const scaleFactor = 1 / state.scale;
-    const origX = Math.round((x - state.offsetX) * scaleFactor);
-    const origY = Math.round((y - state.offsetY) * scaleFactor);
-    const origWidth = Math.round(width * scaleFactor);
-    const origHeight = Math.round(height * scaleFactor);
+    const origX = Math.round(x);
+    const origY = Math.round(y);
+    const origWidth = Math.round(width);
+    const origHeight = Math.round(height);
 
     // Validate coordinates
     if (origWidth <= 0 || origHeight <= 0 || 
