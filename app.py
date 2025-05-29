@@ -7,7 +7,6 @@ from flask_cors import CORS
 import subprocess
 import shutil
 import h5py
-import time
 from PIL import Image, ImageOps
 import numpy as np
 import zipfile
@@ -19,6 +18,21 @@ from datetime import timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 import datetime
 import atexit
+from tensorflow.python.summary.summary_iterator import summary_iterator
+import glob
+import tensorflow as tf
+
+def get_scalar_value(v):
+    if hasattr(v, 'simple_value') and v.simple_value != 0.0:
+        return v.simple_value
+    elif hasattr(v, 'tensor'):
+        try:
+            t = tf.make_ndarray(v.tensor)
+            return float(t)
+        except Exception as e:
+            print(f"[Error extracting tensor value for {v.tag}]: {e}")
+            return None
+    return None
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True)  # This will allow all domains to access your API
@@ -596,10 +610,14 @@ def train_saved_data():
         weights_path = 'snapshots/SGN_Rene.h5' if model_type == 'SGN' else 'snapshots/MADMweights.h5'
         if not os.path.exists(weights_path):
             return jsonify({'error': f'Weights file not found at {weights_path}'}), 400
+        
+        tb_log_dir = os.path.join(user_snapshot_dir, 'tensorboard')
+        os.makedirs(tb_log_dir, exist_ok=True)
 
         # 6. Build training command
         cmd = [
             'python3', 'keras_retinanet/keras_retinanet/bin/train.py',
+            '--tensorboard-dir', tb_log_dir,
             '--weights', weights_path,
             '--freeze-backbone',
             '--lr', '1e-4',
@@ -699,9 +717,12 @@ def train_model():
         except ValueError:
             return jsonify({'error': 'Invalid epochs value'}), 400
 
+        tb_log_dir = os.path.join(user_snapshot_dir, 'tensorboard')
+        os.makedirs(tb_log_dir, exist_ok=True)
         # Run training
         cmd = [
             'python3', 'keras_retinanet/keras_retinanet/bin/train.py',
+            '--tensorboard-dir', tb_log_dir,
             '--weights', weights_file,
             '--lr', '1e-4',
             '--batch-size', '8',
@@ -1085,6 +1106,54 @@ def batch_detect():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+from flask import jsonify, session
+from tensorflow.python.summary.summary_iterator import summary_iterator
+import os
+import glob
+
+@app.route('/events-data', methods=['GET'])
+def events_data():
+    user_id = session.get('user_id')
+    log_dir = os.path.join('users', user_id, 'snapshots', 'tensorboard', 'train')
+
+    if not os.path.exists(log_dir):
+        return jsonify({'error': f'Log dir not found: {log_dir}'}), 404
+
+    # Find all event files directly in train/
+    event_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))
+    # Only pick files older than 5 seconds (to avoid reading during flush)
+    now = time.time()
+    event_files = [f for f in event_files if now - os.path.getmtime(f) > 5]
+    if not event_files:
+        return jsonify({'error': 'No event files found in train/'}), 404
+
+    # Pick the newest one
+    event_files.sort(key=os.path.getmtime, reverse=True)
+    latest = event_files[0]
+    print(f"[events-data] ✅ Reading from: {latest}")
+
+    scalars = {}
+    for e in summary_iterator(latest):
+        if not e.summary:
+            continue
+        for v in e.summary.value:
+            val = get_scalar_value(v)
+            if val is not None:
+                print(f"✅ Tag: {v.tag}, value: {val}")
+                scalars.setdefault(v.tag, []).append({
+                    'step': e.step,
+                    'wall_time': e.wall_time,
+                    'value': val
+                })
+
+
+    if not scalars:
+        return jsonify({'error': 'No scalar values found'}), 404
+
+    return jsonify(scalars)
+
+
 
 def delete_expired_sessions():
     now = datetime.datetime.utcnow()  # Use UTC time
