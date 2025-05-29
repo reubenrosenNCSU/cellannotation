@@ -6,6 +6,7 @@
     <title>Advanced Image Annotation Tool</title>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tiff.js@1.0.0/tiff.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -198,6 +199,16 @@ input[type="number"]::-webkit-outer-spin-button {
     #color-toggle-btn.active {
         background: #2196F3;
     }
+    #metrics-modal h2 {
+    margin-top: 0;
+    color: #333;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+}
+
+#charts-container {
+    padding: 20px 0;
+}
     </style>
 </head>
 <body>
@@ -290,6 +301,7 @@ input[type="number"]::-webkit-outer-spin-button {
         <button class="btn tooltip" data-tooltip="Save data for retraining" id="save-training-data-btn">Save Training Data</button>
         <button class="btn tooltip" data-tooltip="Upload data to retrain" id="fine-tune-btn">Fine-tune (Custom)</button>
         <button class="btn tooltip" data-tooltip="Retrain on saved data" id="fine-tune-saved-btn">Fine-tune (Saved Data)</button>
+        <button id="show-metrics-btn">Show Training Metrics</button>
         <div class="model-group">
             <label>Select Model Type:</label>
             <select id="model-type-select" class="btn">
@@ -519,7 +531,58 @@ function updateLastAnnotationDiameter() {
     document.getElementById('last-annotated-diameter').textContent = diameter;
 }
 
+document.getElementById('show-metrics-btn').addEventListener('click', async () => {
+    try {
+        // Show modal
+        const modal = document.getElementById('metrics-modal');
+        modal.style.display = 'block';
+        
+        // Clear previous charts
+        const container = document.getElementById('charts-container');
+        container.innerHTML = '';
 
+        const res = await axios.get('/events-data');
+        const data = res.data;
+
+        Object.entries(data).forEach(([tag, points]) => {
+            const chartContainer = document.createElement('div');
+            chartContainer.style.width = '45%';
+            chartContainer.style.minWidth = '400px';
+            chartContainer.style.marginBottom = '20px';
+            
+            const canvas = document.createElement('canvas');
+            chartContainer.appendChild(canvas);
+            container.appendChild(chartContainer);
+
+            new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: points.map(p => p.step),
+                    datasets: [{
+                        label: tag,
+                        data: points.map(p => p.value),
+                        fill: false,
+                        tension: 0.2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { title: { display: true, text: 'Step' } },
+                        y: { title: { display: true, text: tag } }
+                    }
+                }
+            });
+        });
+    } catch (err) {
+        alert('Failed to load metrics: ' + (err.response?.data?.error || err.message));
+    }
+});
+
+// Add close button handler
+document.getElementById('close-metrics-btn').addEventListener('click', () => {
+    document.getElementById('metrics-modal').style.display = 'none';
+});
 
 
 
@@ -1760,6 +1823,14 @@ document.getElementById('fine-tune-btn').addEventListener('click', () => {
                 style="flex: 1; background: #4CAF50;">Process</button>
         <button class="btn" onclick="document.getElementById('batch-modal').style.display = 'none'" 
                 style="flex: 1; background: #f44336;">Cancel</button>
+    </div>
+</div>
+<!-- Metrics Modal -->
+<div id="metrics-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 2000;">
+    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; width: 80%; height: 80%; padding: 20px; overflow: auto;">
+        <button style="position: absolute; top: 10px; right: 10px; background: red; color: white; border: none; padding: 5px 10px;" id="close-metrics-btn">Close</button>
+        <h2>Training Metrics</h2>
+        <div id="charts-container" style="display: flex; flex-wrap: wrap; gap: 20px;"></div>
     </div>
 </div>
 </body>
