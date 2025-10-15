@@ -2,6 +2,8 @@
 
 [![YouTube Demonstration](https://img.shields.io/badge/YouTube-Demonstration-red)](https://youtu.be/IhLrQrVeXEQ)
 
+DISCLAIMER: This has only been tested on the NCSU server, and people on campus have remotely connected to it. I cannot guarantee its deployment because it has not been tested.
+
 A machine learning-based tool for automated detection and annotation of **Spiral Ganglion Neurons (SGN)** cells in microscope images. Built on the `keras-retinanet` framework, this tool enables biologists to deploy and refine object detection models without requiring programming expertise.
 
 ![Screenshot](screenshots/image.png)
