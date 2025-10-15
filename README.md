@@ -56,7 +56,7 @@ Set Up Conda Environment:
 
 ```
 conda env create -f environment.yml
-conda activate environment
+conda activate cell
 pip install -r requirements.txt
 ```
 **Install keras-retinanet in Editable Mode:**
